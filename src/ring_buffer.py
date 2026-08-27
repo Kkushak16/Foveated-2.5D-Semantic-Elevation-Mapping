@@ -102,8 +102,8 @@ class MultiLevelRingBuffer:
         cfg = self.configs[level]
         off_x, off_y = self.offsets[level]
 
-        r = np.linalg.norm(xyz[:, :2], axis=1)
-        valid_mask = (r >= cfg.min_range) & (r <= cfg.max_range)
+        r_sq = xyz[:, 0] ** 2 + xyz[:, 1] ** 2
+        valid_mask = (r_sq >= cfg.min_range ** 2) & (r_sq <= cfg.max_range ** 2)
 
         cx = np.floor(xyz[:, 0] / cfg.cell_size).astype(np.int32)
         cy = np.floor(xyz[:, 1] / cfg.cell_size).astype(np.int32)

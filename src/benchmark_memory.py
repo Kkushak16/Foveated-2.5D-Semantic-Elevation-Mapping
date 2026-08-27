@@ -16,7 +16,6 @@ import csv
 import logging
 import os
 import sys
-import time
 import numpy as np
 
 # Ensure parent directory is in path for imports

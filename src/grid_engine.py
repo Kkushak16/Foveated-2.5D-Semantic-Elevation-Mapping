@@ -166,50 +166,37 @@ class FoveatedGridEngine:
                 ring_soa.ground_z[ug_cells] += k_gain * (ug_means - ring_soa.ground_z[ug_cells])
                 ring_soa.z_variance[ug_cells] = (1.0 - k_gain) * (p_old + self.kalman_q)
 
-            # 4. Class-weighted semantic voting per cell
+            # 4. Vectorized class-weighted semantic voting per cell
             # Priority: dynamic > pole/wall > static > other
             sub_classes = sem_classes[valid_indices]
             sub_confs = confidences[valid_indices]
 
-            for c_idx in unique_cells:
-                mask_c = (cell_flat_indices == c_idx)
-                pts_cls = sub_classes[mask_c]
-                pts_cnf = sub_confs[mask_c]
+            # Build per-class weighted score arrays using vectorized bincount
+            _w = np.array([CLASS_WEIGHTS.get(i, 1.0) for i in range(4)], dtype=np.float32)
+            weighted_confs = sub_confs * _w[np.clip(sub_classes, 0, 3)]
 
-                # Weighted class scoring
-                class_scores = np.zeros(4, dtype=np.float32)
-                for cls_id in range(4):
-                    m = (pts_cls == cls_id)
-                    if np.any(m):
-                        w_prio = CLASS_WEIGHTS.get(cls_id, 1.0)
-                        class_scores[cls_id] = np.sum(pts_cnf[m]) * w_prio
+            num_cells = ring_soa.num_cells
+            class_score_grid = np.zeros((4, num_cells), dtype=np.float32)
+            for cls_id in range(4):
+                cls_mask = (sub_classes == cls_id)
+                if np.any(cls_mask):
+                    np.add.at(class_score_grid[cls_id], cell_flat_indices[cls_mask], weighted_confs[cls_mask])
 
-                best_cls = int(np.argmax(class_scores))
-                tot_score = np.sum(class_scores)
-                best_prob = (class_scores[best_cls] / tot_score) if tot_score > 0 else 0.0
+            # Determine winning class and probability for each observed cell
+            cell_total = class_score_grid[:, unique_cells].sum(axis=0)
+            cell_best_cls = class_score_grid[:, unique_cells].argmax(axis=0).astype(np.int32)
+            cell_best_score = class_score_grid[:, unique_cells].max(axis=0)
+            cell_best_prob = np.where(cell_total > 0, cell_best_score / cell_total, 0.0).astype(np.float32)
 
-                ring_soa.sem_class[c_idx] = best_cls
-                ring_soa.sem_prob[c_idx] = float(best_prob)
+            ring_soa.sem_class[unique_cells] = cell_best_cls
+            ring_soa.sem_prob[unique_cells] = cell_best_prob
 
-                # 5. Overhang Detection logic
-                # Flag if (max_z - ground_z) > clearance AND min_z > ground_z + tau
-                c_min = ring_soa.min_z[c_idx]
-                c_max = ring_soa.max_z[c_idx]
-                c_gnd = ring_soa.ground_z[c_idx]
-
-                if (c_max - c_gnd) > self.vehicle_clearance and (c_min - c_gnd) > self.overhang_gap_tau:
-                    ring_soa.overhang_flag[c_idx] = True
-
-                    # Store multi-level surface patch
-                    patch = SurfacePatch(
-                        mean_z=float((c_max + c_min) / 2.0),
-                        var_z=float((c_max - c_min) ** 2 / 12.0),
-                        depth=float(c_max - c_min),
-                        is_vertical=bool(c_max - c_min > 0.1),
-                        sem_class=best_cls,
-                        confidence=float(ring_soa.confidence[c_idx]),
-                    )
-                    ring_soa.patch_map[c_idx] = [patch]
+            # 5. Vectorized overhang detection
+            c_min = ring_soa.min_z[unique_cells]
+            c_max = ring_soa.max_z[unique_cells]
+            c_gnd = ring_soa.ground_z[unique_cells]
+            overhang_mask = ((c_max - c_gnd) > self.vehicle_clearance) & ((c_min - c_gnd) > self.overhang_gap_tau)
+            ring_soa.overhang_flag[unique_cells[overhang_mask]] = True
 
         return stats
 

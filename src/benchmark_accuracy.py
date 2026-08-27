@@ -79,17 +79,27 @@ def run_accuracy_benchmark(n_samples: int = 10, output_csv: str = "results/bench
         pred_labels = np.full(pts.shape[0], 0, dtype=np.int32)
         pred_labels[gnd_mask] = 3
 
-        # Classify obstacles
+        # Classify obstacles — track non-ground indices for proper label mapping
+        non_gnd_indices = np.where(~gnd_mask)[0]
         clusters = classify_clusters(pts[:, :4], gnd_mask)
         for obj in clusters:
             obj_pts = obj["points"]
-            # Assign predicted class to matching point indices
             c_id = obj["class_id"]
             if obj_pts.shape[0] > 0:
-                # Find matching points
-                dist_matrix = np.linalg.norm(pts[:, :3] - obj["centroid"], axis=1)
-                near_idx = np.where(dist_matrix < 3.0)[0]
-                pred_labels[near_idx] = c_id
+                # Match cluster points back to original indices via coordinate matching
+                # Build distance matrix only against non-ground points for efficiency
+                non_gnd_pts = pts[non_gnd_indices, :3]
+                centroid = obj["centroid"]
+                bbox_min = obj["bbox_min"]
+                bbox_max = obj["bbox_max"]
+                # Use bounding box filter for fast candidate selection
+                in_bbox = (
+                    (non_gnd_pts[:, 0] >= bbox_min[0] - 0.5) & (non_gnd_pts[:, 0] <= bbox_max[0] + 0.5) &
+                    (non_gnd_pts[:, 1] >= bbox_min[1] - 0.5) & (non_gnd_pts[:, 1] <= bbox_max[1] + 0.5) &
+                    (non_gnd_pts[:, 2] >= bbox_min[2] - 0.5) & (non_gnd_pts[:, 2] <= bbox_max[2] + 0.5)
+                )
+                matched_orig_idx = non_gnd_indices[in_bbox]
+                pred_labels[matched_orig_idx] = c_id
 
         # Calculate metrics
         acc = float((pred_labels == gt_labels).mean() * 100.0)

@@ -1,3 +1,5 @@
+from collections import deque
+
 """
 clustering.py — Obstacle Point Cloud Clustering
 =================================================
@@ -198,12 +200,12 @@ def _cluster_euclidean_voxel(
             continue
 
         # BFS
-        queue = [voxel_key]
+        queue = deque([voxel_key])
         visited_voxels.add(voxel_key)
         cluster_points_idx = []
 
         while queue:
-            current = queue.pop(0)
+            current = queue.popleft()
             cluster_points_idx.extend(voxel_map[current])
 
             for dx, dy, dz in offsets:

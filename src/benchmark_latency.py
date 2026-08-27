@@ -26,10 +26,8 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.ground_segmentation import segment_ground
-from src.clustering import cluster_points
 from src.classify_clusters import classify_clusters
 from src.grid_engine import FoveatedGridEngine
-from src.dashboard_phase3 import LiveDashboard
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +36,6 @@ def run_latency_benchmark(n_frames: int = 20, output_csv: str = "results/benchma
     """Execute latency benchmark across synthetic golden test frames."""
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     engine = FoveatedGridEngine()
-    dashboard = LiveDashboard(engine)
 
     rng = np.random.default_rng(2026)
     rows = []
@@ -48,13 +45,12 @@ def run_latency_benchmark(n_frames: int = 20, output_csv: str = "results/benchma
     print("=" * 75)
     print("  Target Throughput: > 10.0 FPS on standard x86 CPU")
     print("-" * 75)
-    print(f"{'Frame':<6} | {'GndSeg(ms)':<10} | {'Cluster(ms)':<11} | {'Classify(ms)':<12} | {'Grid(ms)':<9} | {'Total(ms)':<9} | {'FPS':<6}")
+    print(f"{'Frame':<6} | {'GndSeg(ms)':<10} | {'Cluster+Cls(ms)':<15} | {'Grid(ms)':<9} | {'Total(ms)':<9} | {'FPS':<6}")
     print("-" * 75)
 
     stage1_times = []
     stage2_times = []
     stage3_times = []
-    stage4_times = []
     total_times = []
 
     for f_idx in range(1, n_frames + 1):
@@ -70,18 +66,12 @@ def run_latency_benchmark(n_frames: int = 20, output_csv: str = "results/benchma
         gnd_mask = segment_ground(points)
         t_gnd = (time.perf_counter() - t0) * 1000.0
 
-        # Stage 2: Clustering
-        t0 = time.perf_counter()
-        non_gnd_pts = points[~gnd_mask]
-        cluster_ids = cluster_points(non_gnd_pts[:5000]) # Subsampled cluster input
-        t_cluster = (time.perf_counter() - t0) * 1000.0
-
-        # Stage 3: Classification
+        # Stage 2: Clustering + Classification (combined — classify_clusters calls cluster_points internally)
         t0 = time.perf_counter()
         classified_objs = classify_clusters(points, gnd_mask)
         t_classify = (time.perf_counter() - t0) * 1000.0
 
-        # Stage 4: Foveated Grid Engine Ingest
+        # Stage 3: Foveated Grid Engine Ingest
         t0 = time.perf_counter()
         sem_cls = np.full(n_pts, 0, dtype=np.int32)
         gnd_idx = np.where(gnd_mask)[0]
@@ -91,23 +81,21 @@ def run_latency_benchmark(n_frames: int = 20, output_csv: str = "results/benchma
         engine.insert_points(points[:, :3], sem_cls, confs, gnd_mask)
         t_grid = (time.perf_counter() - t0) * 1000.0
 
-        t_total = t_gnd + t_cluster + t_classify + t_grid
+        t_total = t_gnd + t_classify + t_grid
         fps = 1000.0 / t_total if t_total > 0 else 0.0
 
         stage1_times.append(t_gnd)
-        stage2_times.append(t_cluster)
-        stage3_times.append(t_classify)
-        stage4_times.append(t_grid)
+        stage2_times.append(t_classify)
+        stage3_times.append(t_grid)
         total_times.append(t_total)
 
-        print(f"#{f_idx:<5} | {t_gnd:<10.2f} | {t_cluster:<11.2f} | {t_classify:<12.2f} | {t_grid:<9.2f} | {t_total:<9.2f} | {fps:<6.1f}")
+        print(f"#{f_idx:<5} | {t_gnd:<10.2f} | {t_classify:<15.2f} | {t_grid:<9.2f} | {t_total:<9.2f} | {fps:<6.1f}")
 
         rows.append({
             "frame": f_idx,
             "points": n_pts,
             "ground_seg_ms": f"{t_gnd:.2f}",
-            "clustering_ms": f"{t_cluster:.2f}",
-            "classification_ms": f"{t_classify:.2f}",
+            "cluster_classify_ms": f"{t_classify:.2f}",
             "grid_engine_ms": f"{t_grid:.2f}",
             "total_pipeline_ms": f"{t_total:.2f}",
             "throughput_fps": f"{fps:.1f}"

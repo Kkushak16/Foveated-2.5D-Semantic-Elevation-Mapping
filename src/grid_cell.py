@@ -83,8 +83,8 @@ class RingBufferSoA:
         self.confidence[cell_indices] = 0.0
         self.overhang_flag[cell_indices] = False
 
-        for idx in cell_indices:
-            self.patch_map.pop(int(idx), None)
+        for idx in set(cell_indices.tolist()) & self.patch_map.keys():
+            del self.patch_map[idx]
 
 
 # ── Quick test ────────────────────────────────────────────────────────

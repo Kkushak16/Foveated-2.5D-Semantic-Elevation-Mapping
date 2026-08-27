@@ -146,66 +146,64 @@ class LiveDashboard:
         self.latency_history = []
 
     def build_composite_grid_image(self, canvas_dim: int = 800) -> np.ndarray:
-        """Assemble a single 2D composite bird's-eye view from all 3 rings."""
+        """Assemble a single 2D composite bird's-eye view from all 3 rings (vectorized)."""
         canvas = np.full((canvas_dim, canvas_dim, 3), COLOR_MAP[-1], dtype=np.float32)
         center = canvas_dim // 2
 
-        # 1. Level 2 (Far Ring: 30-100m, extent = 100m)
+        # Pre-build a color lookup array: index by (class_id + 1) so -1 maps to 0
+        color_lut = np.array([
+            COLOR_MAP[-1],  # index 0 -> unobserved
+            COLOR_MAP[0],   # index 1 -> static
+            COLOR_MAP[1],   # index 2 -> dynamic
+            COLOR_MAP[2],   # index 3 -> pole
+            COLOR_MAP[3],   # index 4 -> ground
+        ], dtype=np.float32)
+
+        def _render_ring(sem_class_2d: np.ndarray, px_start: int, px_size: int):
+            """Vectorized ring rendering via lookup + np.repeat upscaling."""
+            if px_size <= 0:
+                return
+            sz = sem_class_2d.shape[0]  # 400
+            # Map class IDs (-1..3) to LUT indices (0..4)
+            lut_idx = np.clip(sem_class_2d + 1, 0, 4).astype(np.intp)
+            # Build (sz, sz, 3) color image via fancy indexing
+            ring_img = color_lut[lut_idx]
+            # Only upscale observed cells — create a mask of observed cells
+            obs_mask = sem_class_2d >= 0
+            if not np.any(obs_mask):
+                return
+
+            # Simple nearest-neighbor upscale using np.repeat
+            scale = max(1, px_size // sz)
+            if scale >= 1:
+                upscaled = np.repeat(np.repeat(ring_img, scale, axis=0), scale, axis=1)
+                # Trim to exact target size
+                upscaled = upscaled[:px_size, :px_size]
+                # Build observed mask at same scale
+                obs_up = np.repeat(np.repeat(obs_mask, scale, axis=0), scale, axis=1)
+                obs_up = obs_up[:px_size, :px_size]
+                # Write only observed pixels
+                px_end = min(px_start + px_size, canvas_dim)
+                actual_h = px_end - px_start
+                actual_w = px_end - px_start
+                region = canvas[px_start:px_end, px_start:px_end]
+                src = upscaled[:actual_h, :actual_w]
+                mask = obs_up[:actual_h, :actual_w]
+                region[mask] = src[mask]
+
+        # 1. Level 2 (Far Ring: 30-100m) — full canvas
         snap2 = self.engine.get_grid_snapshot(level=2)
-        sem2 = snap2["sem_class"]
-        sz2 = sem2.shape[0]
-        scale2 = canvas_dim / sz2
-        for r in range(sz2):
-            for c in range(sz2):
-                cls_id = sem2[r, c]
-                if cls_id >= 0:
-                    px_start_r = int(r * scale2)
-                    px_end_r = int((r + 1) * scale2)
-                    px_start_c = int(c * scale2)
-                    px_end_c = int((c + 1) * scale2)
-                    canvas[px_start_r:px_end_r, px_start_c:px_end_c] = COLOR_MAP.get(cls_id, COLOR_MAP[0])
+        _render_ring(snap2["sem_class"], 0, canvas_dim)
 
-        # 2. Overlay Level 1 (Mid Ring: 10-30m, extent = 30m)
+        # 2. Level 1 (Mid Ring: 10-30m) — centered 60% of canvas
         snap1 = self.engine.get_grid_snapshot(level=1)
-        sem1 = snap1["sem_class"]
-        sz1 = sem1.shape[0]
         mid_pixel_span = int(canvas_dim * (30.0 / 100.0))
-        m_start = center - mid_pixel_span
-        m_end = center + mid_pixel_span
-        m_size = m_end - m_start
+        _render_ring(snap1["sem_class"], center - mid_pixel_span, mid_pixel_span * 2)
 
-        if m_size > 0:
-            scale1 = m_size / sz1
-            for r in range(sz1):
-                for c in range(sz1):
-                    cls_id = sem1[r, c]
-                    if cls_id >= 0:
-                        px_start_r = m_start + int(r * scale1)
-                        px_end_r = m_start + int((r + 1) * scale1)
-                        px_start_c = m_start + int(c * scale1)
-                        px_end_c = m_start + int((c + 1) * scale1)
-                        canvas[px_start_r:px_end_r, px_start_c:px_end_c] = COLOR_MAP.get(cls_id, COLOR_MAP[0])
-
-        # 3. Overlay Level 0 (Near Ring: 0-10m, extent = 10m)
+        # 3. Level 0 (Near Ring: 0-10m) — centered 20% of canvas
         snap0 = self.engine.get_grid_snapshot(level=0)
-        sem0 = snap0["sem_class"]
-        sz0 = sem0.shape[0]
         near_pixel_span = int(canvas_dim * (10.0 / 100.0))
-        n_start = center - near_pixel_span
-        n_end = center + near_pixel_span
-        n_size = n_end - n_start
-
-        if n_size > 0:
-            scale0 = n_size / sz0
-            for r in range(sz0):
-                for c in range(sz0):
-                    cls_id = sem0[r, c]
-                    if cls_id >= 0:
-                        px_start_r = n_start + int(r * scale0)
-                        px_end_r = n_start + int((r + 1) * scale0)
-                        px_start_c = n_start + int(c * scale0)
-                        px_end_c = n_start + int((c + 1) * scale0)
-                        canvas[px_start_r:px_end_r, px_start_c:px_end_c] = COLOR_MAP.get(cls_id, COLOR_MAP[0])
+        _render_ring(snap0["sem_class"], center - near_pixel_span, near_pixel_span * 2)
 
         return canvas
 
