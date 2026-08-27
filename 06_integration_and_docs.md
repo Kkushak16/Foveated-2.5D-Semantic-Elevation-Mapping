@@ -31,10 +31,9 @@ artifacts we need to present the project.
       zero-risk replay — must work standalone with no live compute, no
       network, no dependencies beyond playing back saved files.
    b. LIVE PLAYBACK (primary demo mode): run the actual pipeline live on a
-      laptop, feeding from the pre-loaded SemanticKITTI/nuScenes clip instead
-      of a real sensor. Judges see real inference (FPS counter, memory graph
-      updating live) — looks and behaves like a live demo with none of the
-      hardware risk. This is what you present with unless it fails, then
+      laptop with a Streamlit web interface (`localhost:8501`), feeding from the pre-loaded SemanticKITTI clip instead
+      of a real sensor. Judges see real inference with Streamlit `st.metric()` cards (FPS counter, memory graph
+      updating live) — clean, low-risk, zero web/network dependency. This is what you present with unless it fails, then
       fall back to (a) immediately without breaking narration.
    c. Optional bonus (only if Phase 4 has slack time): small physical rig
       (cheap LiDAR + webcam on an RC car or handheld) driven live around the
