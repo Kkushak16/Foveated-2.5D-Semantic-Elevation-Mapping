@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Data / Images / Outputs
+*.bmp
+*.png
+*.jpg
+*.jpeg
+dashboard_frame_*.bmp
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
