@@ -282,27 +282,73 @@ snapshot = engine.get_grid_snapshot(level=0)
 
 ---
 
+## 📊 Phase 4 — Visualization Dashboard
+
+3-Ring Layout Visualizer with interactive / pure BMP snapshot fallback for zero-dependency execution:
+
+```bash
+# Test Phase 1 Raw Point Cloud Viewer
+python run.py viewer_phase1 --synthetic
+
+# Test Phase 2 Layout & HUD Stub
+python run.py dashboard_phase2 --save-img recorded_demo/fallback_hud.bmp
+
+# Test Phase 3 Live Dashboard Stream & Benchmark Loop
+python run.py dashboard_phase3 --synthetic --frames 15
+```
+
+---
+
+## ⚡ Phase 5 — Benchmarking & Robustness Suite
+
+Automated performance benchmarks evaluating RAM footprint, per-stage CPU throughput (FPS), semantic classification mIoU, and edge-case system robustness:
+
+```bash
+# Run Master Benchmark Suite (Memory + Latency + Accuracy + Robustness)
+python run.py benchmark_suite
+
+# Individual Benchmarks
+python run.py benchmark_memory    # Compares 18.4MB MLRB vs 1,600MB Uniform Grid
+python run.py benchmark_latency   # Measures per-stage execution times and FPS
+python run.py benchmark_accuracy  # Evaluates class IoUs and mIoU vs ground truth
+python run.py test_robustness     # Overhang, far-cell decay, and 100k-point stress tests
+```
+
+---
+
+## 🎬 Phase 6 — Integration, Documentation & Hackathon Demo
+
+Full technical documentation and dual-mode hackathon demo playbook:
+- **`docs/demo_script.md`**: Live presentation script + zero-risk fallback walkthrough.
+- **`docs/team-notes.md`**: Architectural trade-off analysis (2.5D vs 3D Voxel, CPU vs GPU, SoA layout).
+- **`recorded_demo/`**: Archive containing pre-rendered BMP frame snapshots for instant presentation fallback.
+
+---
+
 ## 🗺️ Roadmap
 
-| Phase | Days   | Scope                                                      | Status |
-|-------|--------|------------------------------------------------------------|--------|
-| **1** | 1–5    | Dataset pipeline + ground segmentation + basic viewer       | ✅ Done |
-| **2** | 6–12   | Clustering + classifier + ring buffer core + dashboard skel | ✅ Done |
-| **3** | 13–19  | Full integration: classifier → grid engine → live API       | ✅ Done |
-| 4     | 20–25  | Benchmarking vs. uniform-grid baseline, polish, docs, demo  | 🔲      |
+| Phase | Scope | Status |
+|---|---|---|
+| **Phase 1** | Dataset pipeline + ground segmentation + basic viewer | ✅ Done |
+| **Phase 2** | Clustering + obstacle feature classifier + ring buffer core | ✅ Done |
+| **Phase 3** | Foveated 2.5D Grid Engine + SoA ring buffers + temporal decay | ✅ Done |
+| **Phase 4** | 3-Ring HUD visualization dashboard & frame playback | ✅ Done |
+| **Phase 5** | Automated benchmarking suite vs uniform baseline & robustness tests | ✅ Done |
+| **Phase 6** | Architecture documentation, hackathon script & pre-rendered demo archive | ✅ Done |
 
 ---
 
 ## 👥 Team
 
-| Member | Focus Area                                        |
+| Member | Focus Area |
 |--------|---------------------------------------------------|
-| A      | Perception / ML (ground seg, clustering, classify) |
-| B      | Grid Engine / Backend (C++ ring buffer, projection) |
-| C      | Visualization / Integration (dashboard, benchmarks) |
+| A | Perception / ML (ground seg, clustering, classify) |
+| B | Grid Engine / Backend (SoA ring buffer, 2.5D projection) |
+| C | Visualization / Integration (dashboard, benchmarking, demo) |
 
 ---
 
 ## 📜 License
 
 Apache-2.0 — see individual file headers for details.
+
