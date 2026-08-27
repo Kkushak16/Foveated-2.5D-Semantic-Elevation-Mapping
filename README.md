@@ -297,6 +297,16 @@ python run.py dashboard_phase2 --save-img recorded_demo/fallback_hud.bmp
 python run.py dashboard_phase3 --synthetic --frames 15
 ```
 
+### 📸 Dashboard & Render Snapshots
+
+| Phase 1 Point Cloud Viewer | Phase 2 HUD Visualization | Phase 3 Foveated Ring Grid |
+| :---: | :---: | :---: |
+| ![Viewer Phase 1](./viewer_p1.bmp) | ![Fallback HUD](./recorded_demo/fallback_hud.bmp) | ![Dashboard Phase 3](./dashboard_p3.bmp) |
+
+| Live Stream Frame 1 | Live Stream Frame 2 | Live Stream Frame 3 |
+| :---: | :---: | :---: |
+| ![Frame 1](./dashboard_frame_001.bmp) | ![Frame 2](./dashboard_frame_002.bmp) | ![Frame 3](./dashboard_frame_003.bmp) |
+
 ---
 
 ## ⚡ Phase 5 — Benchmarking & Robustness Suite

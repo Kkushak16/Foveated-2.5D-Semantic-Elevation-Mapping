@@ -10,12 +10,16 @@ __pycache__/
 *$py.class
 *.so
 
-# Data / Images / Outputs
-*.bmp
-*.png
-*.jpg
-*.jpeg
-dashboard_frame_*.bmp
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Keep dataset bin files ignored, but allow project screenshots and demo frames
+*.bin
+*.label
+
 
 # IDE / OS
 .vscode/
