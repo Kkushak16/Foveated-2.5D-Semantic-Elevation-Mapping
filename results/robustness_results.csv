@@ -1,0 +1,4 @@
+test_name,result
+Overhang Handling (Bridge/Tunnel),PASSED
+Sparse Far-Cell Confidence Decay,PASSED
+Stress & Memory Stability (100k pts),PASSED
