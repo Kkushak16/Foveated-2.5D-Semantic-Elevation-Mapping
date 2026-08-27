@@ -160,36 +160,38 @@ class LiveDashboard:
         ], dtype=np.float32)
 
         def _render_ring(sem_class_2d: np.ndarray, px_start: int, px_size: int):
-            """Vectorized ring rendering via lookup + np.repeat upscaling."""
+            """Vectorized ring rendering via exact nearest-neighbor index mapping + LUT."""
             if px_size <= 0:
                 return
-            sz = sem_class_2d.shape[0]  # 400
-            # Map class IDs (-1..3) to LUT indices (0..4)
-            lut_idx = np.clip(sem_class_2d + 1, 0, 4).astype(np.intp)
-            # Build (sz, sz, 3) color image via fancy indexing
-            ring_img = color_lut[lut_idx]
-            # Only upscale observed cells — create a mask of observed cells
-            obs_mask = sem_class_2d >= 0
+            sz = sem_class_2d.shape[0]  # e.g., 400
+            if sz == 0:
+                return
+
+            # Bounds check against canvas
+            px_end_h = min(px_start + px_size, canvas_dim)
+            px_end_w = min(px_start + px_size, canvas_dim)
+            actual_h = px_end_h - px_start
+            actual_w = px_end_w - px_start
+            if actual_h <= 0 or actual_w <= 0:
+                return
+
+            # Generate exact nearest-neighbor index mapping to target canvas region dimensions
+            row_idx = (np.arange(actual_h) * (sz / px_size)).astype(np.intp)
+            col_idx = (np.arange(actual_w) * (sz / px_size)).astype(np.intp)
+            sem_resized = sem_class_2d[np.ix_(row_idx, col_idx)]
+
+            # Observed cells mask
+            obs_mask = sem_resized >= 0
             if not np.any(obs_mask):
                 return
 
-            # Simple nearest-neighbor upscale using np.repeat
-            scale = max(1, px_size // sz)
-            if scale >= 1:
-                upscaled = np.repeat(np.repeat(ring_img, scale, axis=0), scale, axis=1)
-                # Trim to exact target size
-                upscaled = upscaled[:px_size, :px_size]
-                # Build observed mask at same scale
-                obs_up = np.repeat(np.repeat(obs_mask, scale, axis=0), scale, axis=1)
-                obs_up = obs_up[:px_size, :px_size]
-                # Write only observed pixels
-                px_end = min(px_start + px_size, canvas_dim)
-                actual_h = px_end - px_start
-                actual_w = px_end - px_start
-                region = canvas[px_start:px_end, px_start:px_end]
-                src = upscaled[:actual_h, :actual_w]
-                mask = obs_up[:actual_h, :actual_w]
-                region[mask] = src[mask]
+            # Map class IDs (-1..3) to LUT indices (0..4)
+            lut_idx = np.clip(sem_resized + 1, 0, 4).astype(np.intp)
+            ring_img = color_lut[lut_idx]
+
+            # Write observed pixels to canvas region
+            region = canvas[px_start:px_end_h, px_start:px_end_w]
+            region[obs_mask] = ring_img[obs_mask]
 
         # 1. Level 2 (Far Ring: 30-100m) — full canvas
         snap2 = self.engine.get_grid_snapshot(level=2)
