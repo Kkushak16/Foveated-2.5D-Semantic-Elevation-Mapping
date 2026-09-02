@@ -11,6 +11,9 @@
 </head>
 <body>
 
+    <!-- Hidden Video Element for Live Webcam Capture -->
+    <video id="webcam-feed" autoplay playsinline style="display:none;"></video>
+
     <!-- Header Navigation Bar -->
     <header>
         <div class="brand">
@@ -40,6 +43,23 @@
         <!-- Left Panel: Controls, Telemetry & Legend -->
         <div class="panel">
             <div class="panel-title">⚙️ Interactive Controls</div>
+
+            <div class="control-group">
+                <label for="select-cam-source" class="metric-label">Camera Sensor Input</label>
+                <select id="select-cam-source" class="custom-select" onchange="switchCameraSource(this.value)">
+                    <option value="synthetic" selected>🤖 Synthetic Benchmark Stream</option>
+                    <option value="webcam">📹 Live Physical Webcam Feed</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="select-motion" class="metric-label">Vehicle Trajectory Mode</label>
+                <select id="select-motion" class="custom-select" onchange="switchVehicleMotion(this.value)">
+                    <option value="stationary" selected>🅿️ Stationary / Parked (X:0.0m, Y:0.0m)</option>
+                    <option value="circular">🔄 Circular Orbit Simulation</option>
+                </select>
+            </div>
+
             <div class="control-group">
                 <label for="select-points" class="metric-label">LiDAR Point Density</label>
                 <select id="select-points" class="custom-select" onchange="updatePointDensity(this.value)">
@@ -54,13 +74,13 @@
                 <button id="btn-play-pause" class="action-btn primary" onclick="toggleSimulation()">⏸️ Pause Stream</button>
             </div>
 
-            <div class="panel-title" style="margin-top: 10px;">⚡ Telemetry & Benchmarks</div>
+            <div class="panel-title" style="margin-top: 6px;">⚡ Telemetry & Benchmarks</div>
 
             <div class="metric-grid">
                 <div class="metric-card">
                     <div class="metric-label">Pipeline Throughput</div>
                     <div class="metric-val" id="stat-fps">72.3 FPS</div>
-                    <div class="metric-sub">+12.2x vs Baseline</div>
+                    <div class="metric-sub" id="stat-fps-sub">Live GPU Benchmark</div>
                 </div>
 
                 <div class="metric-card">
@@ -82,7 +102,7 @@
                 </div>
             </div>
 
-            <div class="panel-title" style="margin-top: 10px;">🎨 Semantic & Ring Legend</div>
+            <div class="panel-title" style="margin-top: 6px;">🎨 Semantic & Ring Legend</div>
             <div class="legend-list">
                 <div class="legend-item">
                     <span><span class="legend-color" style="background:#4ade80;"></span>Ground Surface</span>
@@ -128,13 +148,13 @@
 
             <div class="metric-card">
                 <div class="metric-label">Semantic Spatial Masking</div>
-                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-green);">50% ROI Retained</div>
+                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-green);" id="stat-mask-roi">50% ROI Retained</div>
                 <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Sky (35%) & Hood (15%) zeroed out instantly</div>
             </div>
 
             <div class="metric-card">
                 <div class="metric-label">Optical Flow Motion Gating</div>
-                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-cyan);">72.5% Cache Hits</div>
+                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-cyan);" id="stat-flow-hits">72.5% Cache Hits</div>
                 <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Farnebäck motion vectors gate static regions</div>
             </div>
 
@@ -147,7 +167,7 @@
                 </div>
             </div>
 
-            <div class="panel-title" style="margin-top: 10px;">💻 Multi-Language Architecture</div>
+            <div class="panel-title" style="margin-top: 6px;">💻 Multi-Language Architecture</div>
 
             <div class="metric-card">
                 <div class="metric-label">Python (PyTorch / ONNX)</div>
