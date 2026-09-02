@@ -21,7 +21,7 @@ if SRC_DIR not in sys.path:
 
 from src.grid_engine import FoveatedGridEngine
 from src.dashboard_phase3 import LiveDashboard
-from src.ground_segmentation import generate_synthetic_point_cloud
+from src.viewer_phase1 import generate_demo_point_cloud as generate_synthetic_point_cloud
 
 # Streamlit Page Config
 st.set_page_config(
@@ -90,7 +90,7 @@ def run_simulation():
         t0 = time.perf_counter()
         
         # 1. Generate frame
-        pts = generate_synthetic_point_cloud(n_points=point_count, seed=2026 + f)
+        pts, _ = generate_synthetic_point_cloud(n_points=point_count)
         
         # 2. Assign classes
         n_pts = len(pts)
@@ -110,11 +110,7 @@ def run_simulation():
 
         # 4. Render Composite Image
         t_r0 = time.perf_counter()
-        composite_img = dashboard.build_composite_grid_image(
-            fps=1000.0 / max(t_ingest, 1.0),
-            latency_ms=t_ingest,
-            mem_mb=18.4
-        )
+        composite_img = dashboard.build_composite_grid_image()
         t_render = (time.perf_counter() - t_r0) * 1000.0
 
         # Display image
@@ -138,13 +134,13 @@ else:
     # Render static initial preview frame
     engine = FoveatedGridEngine()
     dashboard = LiveDashboard(engine)
-    pts = generate_synthetic_point_cloud(n_points=point_count, seed=2026)
+    pts, _ = generate_synthetic_point_cloud(n_points=point_count)
     gnd_mask = pts[:, 2] < -1.2
     sem_cls = np.full(len(pts), 0, dtype=np.int32)
     sem_cls[gnd_mask] = 3
     confs = np.full(len(pts), 0.95, dtype=np.float32)
     engine.insert_points(pts[:, :3], sem_cls, confs, gnd_mask)
-    preview_img = dashboard.build_composite_grid_image(fps=72.3, latency_ms=13.8, mem_mb=18.4)
+    preview_img = dashboard.build_composite_grid_image()
     
     canvas_container.image(
         preview_img,

@@ -25,3 +25,9 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Build artifacts & compiled models
+build/
+*.onnx
+*.engine
+*.plan
