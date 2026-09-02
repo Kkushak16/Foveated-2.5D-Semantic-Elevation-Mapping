@@ -1,149 +1,71 @@
 """
-app.py — Foveated 2.5D LiDAR Grid Mapping Streamlit Web App
-============================================================
-Launches a real-time web dashboard accessible at http://localhost:8501
-for judge presentations and live perception pipeline visual evaluation.
+app.py — Unified Dual-Sensor Foveated 2.5D Perception Web Dashboard
+===================================================================
+Master entrypoint for the unified web dashboard.
 
 Usage:
-    streamlit run app.py
+    py app.py               -> Launches local server & opens Web Dashboard at http://localhost:8080
+    streamlit run app.py    -> Launches Streamlit App embedding the Unified Web HUD
 """
 
 import os
 import sys
-import time
-import numpy as np
-import streamlit as st
 
-# Add src to python path
-SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-from src.grid_engine import FoveatedGridEngine
-from src.dashboard_phase3 import LiveDashboard
-from src.viewer_phase1 import generate_demo_point_cloud as generate_synthetic_point_cloud
+# Check if running under Streamlit
+try:
+    import streamlit as st
+    is_streamlit = True
+except ImportError:
+    is_streamlit = False
 
-# Streamlit Page Config
-st.set_page_config(
-    page_title="Foveated 2.5D LiDAR Grid Mapping HUD",
-    page_icon="🚗",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+def run_standalone():
+    import run_dashboard
+    run_dashboard.main()
 
-# Custom Styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #1E88E5;
-        margin-bottom: 0px;
-    }
-    .sub-header {
-        font-size: 1.1rem;
-        color: #B0BEC5;
-        margin-bottom: 20px;
-    }
-    .stMetric {
-        background-color: #1E222A;
-        padding: 12px;
-        border-radius: 8px;
-        border-left: 4px solid #1E88E5;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown('<div class="main-header">🚗 Foveated 2.5D LiDAR Semantic Elevation Mapping</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Real-Time CPU Perception Pipeline HUD for Autonomous Vehicles</div>', unsafe_allow_html=True)
-
-# Sidebar Controls
-st.sidebar.header("⚙️ Simulation Controls")
-total_frames = st.sidebar.slider("Number of Frames to Play", min_value=5, max_value=50, value=20, step=5)
-point_count = st.sidebar.selectbox("LiDAR Point Density", [30000, 50000, 80000, 100000], index=2)
-frame_delay = st.sidebar.slider("Frame Delay (sec)", min_value=0.0, max_value=0.5, value=0.05, step=0.01)
-
-run_button = st.sidebar.button("▶️ Run Live Simulation", type="primary")
-
-# HUD Telemetry Metric Cards
-col1, col2, col3, col4 = st.columns(4)
-
-metric_fps = col1.metric("Pipeline Throughput", "72.3 FPS", "+12.2x vs Baseline")
-metric_latency = col2.metric("Grid Ingest Latency", "13.8 ms", "Real-Time Sub-15ms")
-metric_ram = col3.metric("RAM Memory Footprint", "18.4 MB", "-99.1% Footprint Saved")
-metric_mIoU = col4.metric("Semantic mIoU", "0.78", "Ground / Wall / Dynamic")
-
-st.markdown("---")
-
-# Main Canvas Placeholder
-canvas_container = st.empty()
-
-def run_simulation():
-    engine = FoveatedGridEngine()
-    dashboard = LiveDashboard(engine)
-    rng = np.random.default_rng(2026)
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for f in range(1, total_frames + 1):
-        t0 = time.perf_counter()
-        
-        # 1. Generate frame
-        pts, _ = generate_synthetic_point_cloud(n_points=point_count)
-        
-        # 2. Assign classes
-        n_pts = len(pts)
-        sem_cls = np.full(n_pts, 0, dtype=np.int32)
-        gnd_mask = pts[:, 2] < -1.2
-        sem_cls[gnd_mask] = 3  # Drivable road
-        
-        # Obstacles
-        obs_mask = (pts[:, 0] > 5) & (pts[:, 0] < 25) & (np.abs(pts[:, 1]) < 8) & (pts[:, 2] >= -1.2)
-        sem_cls[obs_mask] = rng.choice([1, 2], size=np.sum(obs_mask))  # Dynamic / Pole
-        
-        confs = rng.uniform(0.85, 1.0, n_pts).astype(np.float32)
-
-        # 3. Grid Ingest
-        engine.insert_points(pts[:, :3], sem_cls, confs, gnd_mask)
-        t_ingest = (time.perf_counter() - t0) * 1000.0
-
-        # 4. Render Composite Image
-        t_r0 = time.perf_counter()
-        composite_img = dashboard.build_composite_grid_image()
-        t_render = (time.perf_counter() - t_r0) * 1000.0
-
-        # Display image
-        canvas_container.image(
-            composite_img,
-            caption=f"Frame #{f}/{total_frames} | Ingest: {t_ingest:.1f}ms | Render: {t_render:.1f}ms | FPS: {1000.0/t_ingest:.1f}",
-            use_container_width=True
+if __name__ == "__main__":
+    # Check if executed directly with python (e.g. `py app.py`) vs `streamlit run app.py`
+    if not is_streamlit or "streamlit" not in sys.modules or not sys.argv[0].endswith("streamlit"):
+        run_standalone()
+    else:
+        st.set_page_config(
+            page_title="Unified Foveated 2.5D Perception HUD",
+            page_icon="🚗",
+            layout="wide"
         )
-
-        progress_bar.progress(f / total_frames)
-        status_text.text(f"Processing Frame {f} of {total_frames}...")
         
-        if frame_delay > 0:
-            time.sleep(frame_delay)
+        # Hide default padding
+        st.markdown("""
+        <style>
+            .block-container { padding-top: 1rem; padding-bottom: 0rem; padding-left: 1rem; padding-right: 1rem; }
+            header { visibility: hidden; }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Serve index.html content directly in Streamlit
+        html_path = os.path.join(SCRIPT_DIR, "web", "ui", "index.html")
+        styles_path = os.path.join(SCRIPT_DIR, "web", "ui", "styles.css")
+        js_path = os.path.join(SCRIPT_DIR, "web", "ui", "teleop_dashboard.js")
 
-    status_text.success("✅ Simulation Run Completed Successfully!")
+        if os.path.exists(html_path) and os.path.exists(styles_path) and os.path.exists(js_path):
+            with open(html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            with open(styles_path, "r", encoding="utf-8") as f:
+                css_content = f.read()
+            with open(js_path, "r", encoding="utf-8") as f:
+                js_content = f.read()
 
-if run_button or st.session_state.get("auto_start", False):
-    run_simulation()
-else:
-    # Render static initial preview frame
-    engine = FoveatedGridEngine()
-    dashboard = LiveDashboard(engine)
-    pts, _ = generate_synthetic_point_cloud(n_points=point_count)
-    gnd_mask = pts[:, 2] < -1.2
-    sem_cls = np.full(len(pts), 0, dtype=np.int32)
-    sem_cls[gnd_mask] = 3
-    confs = np.full(len(pts), 0.95, dtype=np.float32)
-    engine.insert_points(pts[:, :3], sem_cls, confs, gnd_mask)
-    preview_img = dashboard.build_composite_grid_image()
-    
-    canvas_container.image(
-        preview_img,
-        caption="Preview Frame (Ready - Click 'Run Live Simulation' in sidebar to start stream)",
-        use_container_width=True
-    )
+            combined_html = f"""
+            <style>
+            {css_content}
+            body {{ height: 95vh !important; }}
+            </style>
+            {html_content}
+            <script>
+            {js_content}
+            </script>
+            """
+            st.components.v1.html(combined_html, height=850, scrolling=False)
+        else:
+            st.error("Dashboard assets not found in web/ui/")
