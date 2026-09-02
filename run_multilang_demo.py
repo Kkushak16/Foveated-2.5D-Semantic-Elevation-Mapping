@@ -43,6 +43,10 @@ def step_camera_foveation():
     from python.camera_foveated_processor import run_camera_foveated_demo
     run_camera_foveated_demo()
 
+def step_recurrent_gaze_rl():
+    from python.recurrent_gaze_policy import run_recurrent_gaze_demo
+    run_recurrent_gaze_demo(num_glances=3, num_steps=5)
+
 def step_cpp_cuda_sim():
     print("[Modern C++] Initializing Multi-Level Ring Buffer (MLRB) C++17 Core Engine...")
     print("  - Level 0 (Near 0-10m)  : 400x400 cells (5 cm resolution)  | SoA contiguous memory")
@@ -67,6 +71,7 @@ def main():
 
     run_step("STAGE 1A: Python Offline Machine Learning & ONNX Model Export", step_python_onnx)
     run_step("STAGE 1B: Python Camera Foveation & Optical Flow Motion Gating", step_camera_foveation)
+    run_step("STAGE 1C: Python Multi-Step Recurrent Gaze RL Scanning Policy", step_recurrent_gaze_rl)
     run_step("STAGE 2: C++ / CUDA / TensorRT / ROS 2 Onboard Engine Processing", step_cpp_cuda_sim)
     run_step("STAGE 3: JavaScript / TypeScript WebGL Teleoperation Dashboard Bridge", step_web_dashboard)
 
