@@ -21,7 +21,7 @@ def find_available_port(start_port=8080, max_attempts=10):
     for port in range(start_port, start_port + max_attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(('127.0.0.1', port))
+                s.bind(('', port))
                 return port
             except OSError:
                 continue

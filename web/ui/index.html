@@ -3,193 +3,504 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Unified Dual-Sensor Foveated 2.5D Perception HUD — Autonomous Vehicle Dashboard</title>
+    <title>Lidar Perception — Real-Time 2.5D Foveated LiDAR & Camera Dashboard</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
+<body class="landing-active">
 
-    <!-- Hidden Video Element for Live Webcam Capture -->
+    <!-- Hidden Video Element for Live Physical Webcam Feed -->
     <video id="webcam-feed" autoplay playsinline style="display:none;"></video>
 
-    <!-- Header Navigation Bar -->
-    <header>
-        <div class="brand">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M12 2a7 7 0 1 0 7 7"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-            <span>UNIFIED FOVEATED 2.5D PERCEPTION DASHBOARD</span>
+    <!-- Global Top Navigation Bar -->
+    <nav class="saas-navbar">
+        <div class="brand cursor-pointer" onclick="showPageView('landing')">
+            <div class="brand-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <path d="M12 2a7 7 0 1 0 7 7"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <span class="brand-title">LIDAR PERCEPTION</span>
+                <span class="brand-tag">Foveated 2.5D Engine</span>
+            </div>
         </div>
 
-        <div class="view-selector">
-            <button class="view-btn active" id="btn-view-bev" onclick="setDashboardView('bev')">LiDAR BEV Grid</button>
-            <button class="view-btn" id="btn-view-cam" onclick="setDashboardView('camera')">Camera Foveation</button>
-            <button class="view-btn" id="btn-view-dual" onclick="setDashboardView('dual')">Dual-Sensor Split</button>
+        <div class="nav-links">
+            <a href="#features" data-scroll-to="features">Features</a>
+            <a href="#architecture" data-scroll-to="architecture">Architecture</a>
+            <a href="#benchmarks" data-scroll-to="benchmarks">Telemetry Specs</a>
         </div>
 
-        <div class="status-badge">
-            <span class="status-dot"></span>
-            <span>ORIN-ECU-01 ONLINE</span>
+        <div class="nav-actions">
+            <button class="interactive-hover-btn nav-cta-btn" onclick="showPageView('dashboard')">
+                <span class="btn-text">Launch Teleop HUD</span>
+                <div class="btn-hover-content">
+                    <span>Launch Teleop HUD</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                </div>
+                <div class="btn-bg-expand"></div>
+            </button>
         </div>
-    </header>
+    </nav>
 
-    <!-- Main Grid Layout -->
-    <div class="main-container">
+    <!-- PAGE VIEW 1: 21st.dev SaaS Landing Page -->
+    <main id="landing-view" class="page-view active">
         
-        <!-- Left Panel: Controls, Telemetry & Legend -->
-        <div class="panel">
-            <div class="panel-title">⚙️ Interactive Controls</div>
+        <!-- Hero Section -->
+        <section class="hero-section">
+            <div class="hero-glow-bg"></div>
 
-            <div class="control-group">
-                <label for="select-cam-source" class="metric-label">Camera Sensor Input</label>
-                <select id="select-cam-source" class="custom-select" onchange="switchCameraSource(this.value)">
-                    <option value="synthetic" selected>🤖 Synthetic Benchmark Stream</option>
-                    <option value="webcam">📹 Live Physical Webcam Feed</option>
-                </select>
+            <div class="hero-content">
+                <a href="#features" data-scroll-to="features" class="announcement-badge">
+                    <span>✨ Next-Gen Foveated Perception v2.4</span>
+                    <span style="opacity:0.4;">|</span>
+                    <span>Sub-2ms Zero-Copy CUDA Pipeline</span>
+                    <svg class="badge-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                </a>
+
+                <h1 class="hero-headline">
+                    Real-Time 2.5D LiDAR Perception & <br>
+                    <span class="gradient-text">Foveated Neural Spatial Masking</span>
+                </h1>
+
+                <p class="hero-subtext">
+                    Achieve <strong>79.1% camera compute savings</strong> and sub-2ms CUDA point cloud projection using dynamic 3-ring foveation, zero-copy C++ memory structures, and optical flow motion gating.
+                </p>
+
+                <div class="hero-cta-group">
+                    <button class="interactive-hover-btn primary-hero-btn" onclick="showPageView('dashboard')">
+                        <span class="btn-text">Launch Interactive HUD</span>
+                        <div class="btn-hover-content">
+                            <span>Launch Interactive HUD</span>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                        </div>
+                        <div class="btn-bg-expand"></div>
+                    </button>
+
+                    <a href="#architecture" data-scroll-to="architecture" class="secondary-hero-btn">
+                        <span>Explore C++/CUDA Code</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                    </a>
+                </div>
+
+                <!-- Metric Badges Row -->
+                <div class="hero-metrics-row">
+                    <div class="metric-pill">
+                        <span class="pill-value">72.3 FPS</span>
+                        <span class="pill-label">Live Benchmark Ingest</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-pill">
+                        <span class="pill-value">&lt; 1.82 ms</span>
+                        <span class="pill-label">CUDA Kernel Latency</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-pill">
+                        <span class="pill-value">100,000</span>
+                        <span class="pill-label">LiDAR Points / Frame</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-pill">
+                        <span class="pill-value">-99.1%</span>
+                        <span class="pill-label">Memory Footprint Saved</span>
+                    </div>
+                </div>
             </div>
 
-            <div class="control-group">
-                <label for="select-motion" class="metric-label">Vehicle Trajectory Mode</label>
-                <select id="select-motion" class="custom-select" onchange="switchVehicleMotion(this.value)">
-                    <option value="stationary" selected>🅿️ Stationary / Parked (X:0.0m, Y:0.0m)</option>
-                    <option value="circular">🔄 Circular Orbit Simulation</option>
-                </select>
-            </div>
+            <!-- 21st.dev Style Interactive SaaS Hero Dashboard Mockup Card -->
+            <div class="hero-mockup-wrapper">
+                <div class="mockup-glow-frame">
+                    <div class="mockup-header">
+                        <div class="window-controls">
+                            <span class="dot dot-red"></span>
+                            <span class="dot dot-yellow"></span>
+                            <span class="dot dot-green"></span>
+                        </div>
+                        <span class="window-title">foveated_teleop_hud_stream_v2.4.cpp • ORIN-ECU-01</span>
+                        <span class="window-badge">● LIVE RENDER</span>
+                    </div>
 
-            <div class="control-group">
-                <label for="select-points" class="metric-label">LiDAR Point Density</label>
-                <select id="select-points" class="custom-select" onchange="updatePointDensity(this.value)">
-                    <option value="30000">30,000 pts (Low Power)</option>
-                    <option value="50000">50,000 pts (Balanced)</option>
-                    <option value="80000">80,000 pts (High Res)</option>
-                    <option value="100000" selected>100,000 pts (Full Scan)</option>
-                </select>
-            </div>
-
-            <div class="control-group">
-                <button id="btn-play-pause" class="action-btn primary" onclick="toggleSimulation()">⏸️ Pause Stream</button>
-            </div>
-
-            <div class="panel-title" style="margin-top: 6px;">⚡ Telemetry & Benchmarks</div>
-
-            <div class="metric-grid">
-                <div class="metric-card">
-                    <div class="metric-label">Pipeline Throughput</div>
-                    <div class="metric-val" id="stat-fps">72.3 FPS</div>
-                    <div class="metric-sub" id="stat-fps-sub">Live GPU Benchmark</div>
-                </div>
-
-                <div class="metric-card">
-                    <div class="metric-label">CUDA Ingest Latency</div>
-                    <div class="metric-val" id="stat-latency">1.82 ms</div>
-                    <div class="metric-sub">Sub-2ms Zero Copy</div>
-                </div>
-
-                <div class="metric-card">
-                    <div class="metric-label">Active Points / Scan</div>
-                    <div class="metric-val" id="stat-points">100,000</div>
-                    <div class="metric-sub">Dynamic N Density</div>
-                </div>
-
-                <div class="metric-card">
-                    <div class="metric-label">RAM / VRAM Saved</div>
-                    <div class="metric-val" id="stat-memory">-99.1%</div>
-                    <div class="metric-sub">18.4 MB (O(1) SoA)</div>
+                    <div class="mockup-body">
+                        <canvas id="hero-preview-canvas"></canvas>
+                        
+                        <div class="mockup-overlay-card">
+                            <div class="overlay-status">
+                                <span class="pulse-dot"></span>
+                                <span>3-Ring Foveated Beam Active • 100K Points Rendering</span>
+                            </div>
+                            <button class="interactive-hover-btn mockup-cta" onclick="showPageView('dashboard')">
+                                <span class="btn-text">Open Full Screen Teleop</span>
+                                <div class="btn-hover-content">
+                                    <span>Open Full Screen Teleop</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                                </div>
+                                <div class="btn-bg-expand"></div>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
+        </section>
 
-            <div class="panel-title" style="margin-top: 6px;">🎨 Semantic & Ring Legend</div>
-            <div class="legend-list">
-                <div class="legend-item">
-                    <span><span class="legend-color" style="background:#4ade80;"></span>Ground Surface</span>
-                    <span style="color: var(--accent-green);">Drivable (100%)</span>
+        <!-- Feature Grid Section -->
+        <section id="features" class="features-section">
+            <div class="section-header">
+                <span class="section-tag">ENGINE ARCHITECTURE</span>
+                <h2 class="section-title">Designed for Next-Generation Autonomous Perception</h2>
+                <p class="section-subtext">Combining multi-ring LiDAR spatial dynamic grids with foveated computer vision for low-latency vehicle edge computers.</p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon cyan-glow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a7 7 0 1 0 7 7"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </div>
+                    <h3>Dynamic 3-Ring Elevation Projection</h3>
+                    <p>Multi-resolution ego-centric projection mapping near-field obstacles at 5cm resolution, mid-field at 15cm, and far-field at 50cm with adaptive height thresholding.</p>
+                    <span class="feature-stat">O(1) Array Indexing • Sub-2ms</span>
                 </div>
-                <div class="legend-item">
-                    <span><span class="legend-color" style="background:#38bdf8;"></span>Near Ring (0 - 10m)</span>
-                    <span style="color: var(--accent-cyan);">5 cm Res</span>
+
+                <div class="feature-card">
+                    <div class="feature-icon purple-glow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                    </div>
+                    <h3>Semantic Spatial Masking</h3>
+                    <p>Instantly zeroes out sky (35%) and vehicle hood (15%) regions to restrict visual inference to drivable road surfaces, cutting inference latency by half.</p>
+                    <span class="feature-stat">50% ROI Compute Savings</span>
                 </div>
-                <div class="legend-item">
-                    <span><span class="legend-color" style="background:#c084fc;"></span>Mid Ring (10 - 30m)</span>
-                    <span style="color: var(--accent-purple);">15 cm Res</span>
+
+                <div class="feature-card">
+                    <div class="feature-icon blue-glow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    </div>
+                    <h3>Farnebäck Optical Flow Gating</h3>
+                    <p>Real-time pixel motion analyzer gates static camera regions. Performs full feature extraction only on dynamic motion targets like cars and pedestrians.</p>
+                    <span class="feature-stat">Up to 100% Cache Reuse</span>
                 </div>
-                <div class="legend-item">
-                    <span><span class="legend-color" style="background:#fb923c;"></span>Far Ring (30 - 100m)</span>
-                    <span style="color: var(--accent-orange);">50 cm Res</span>
+
+                <div class="feature-card">
+                    <div class="feature-icon emerald-glow">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    </div>
+                    <h3>Sub-2ms Zero-Copy Memory Pipeline</h3>
+                    <p>High-performance Struct-of-Arrays (SoA) layout with zero garbage collection pause time. Requires only 18.4 MB for 100,000 active LiDAR points per scan.</p>
+                    <span class="feature-stat">99.1% VRAM Savings</span>
                 </div>
-                <div class="legend-item">
-                    <span><span class="legend-color" style="background:#f43f5e;"></span>Dynamic Obstacle</span>
-                    <span style="color: #f43f5e;">Car / Pedestrian</span>
+            </div>
+        </section>
+
+        <!-- Technical Code Showcase Section -->
+        <section id="architecture" class="architecture-section">
+            <div class="section-header">
+                <span class="section-tag">MULTI-LANGUAGE IMPLEMENTATION</span>
+                <h2 class="section-title">Production-Grade Perception Stack</h2>
+                <p class="section-subtext">Click tabs to inspect native algorithm implementations powering the real-time foveated HUD engine.</p>
+            </div>
+
+            <div class="code-tabs-container">
+                <div class="code-tabs-header">
+                    <button class="code-tab active" onclick="switchCodeTab('cpp', this)">C++20 Zero-GC Ingest</button>
+                    <button class="code-tab" onclick="switchCodeTab('cuda', this)">CUDA Elevation Kernel</button>
+                    <button class="code-tab" onclick="switchCodeTab('python', this)">Spatial Masking (Python)</button>
+                    <button class="code-tab" onclick="switchCodeTab('flow', this)">Optical Flow Gating (C++)</button>
                 </div>
+
+                <div class="code-block-body">
+                    <pre><code id="code-display">// Modern C++20 Struct-of-Arrays (SoA) Zero-Allocation Point Cloud Buffer
+struct FoveatedPointBuffer {
+    std::vector&lt;float&gt; x, y, z;
+    std::vector&lt;uint8_t&gt; ring_id;
+    std::vector&lt;float&gt; intensity;
+
+    void reserve_capacity(size_t n_points) {
+        x.reserve(n_points); y.reserve(n_points); z.reserve(n_points);
+        ring_id.reserve(n_points); intensity.reserve(n_points);
+    }
+};
+
+void process_scan(const FoveatedPointBuffer& scan) {
+    #pragma omp parallel for
+    for (size_t i = 0; i &lt; scan.x.size(); ++i) {
+        float r = std::hypot(scan.x[i], scan.y[i]);
+        uint8_t ring = (r &lt; 10.0f) ? 0 : (r &lt; 30.0f) ? 1 : 2;
+        // Direct O(1) ring indexing without dynamic allocation
+    }
+}</code></pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Banner Section -->
+        <section id="benchmarks" class="cta-banner-section">
+            <div class="cta-banner-card">
+                <h2>Experience Real-Time Foveated Teleoperation</h2>
+                <p>Launch the interactive vehicle perception HUD with synthetic benchmark streams or connect your physical webcam feed for live spatial motion tracking.</p>
+                <button class="interactive-hover-btn banner-cta-btn" onclick="showPageView('dashboard')">
+                    <span class="btn-text">Launch Teleop Dashboard HUD</span>
+                    <div class="btn-hover-content">
+                        <span>Launch Teleop Dashboard HUD</span>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+            </div>
+        </section>
+
+        <!-- Landing Page Footer -->
+        <footer class="saas-footer">
+            <div class="footer-content">
+                <div>
+                    <span class="footer-title">Lidar Foveated Perception HUD</span>
+                    <span class="footer-desc">High-Performance Autonomous Vehicle Teleoperation & Spatial Perception System</span>
+                </div>
+                <div class="footer-meta">
+                    <span>PyTorch / ONNX</span>
+                    <span>•</span>
+                    <span>Modern C++20</span>
+                    <span>•</span>
+                    <span>CUDA Kernels</span>
+                    <span>•</span>
+                    <span>ROS 2</span>
+                </div>
+            </div>
+        </footer>
+    </main>
+
+
+    <!-- PAGE VIEW 2: Full Teleoperation Dashboard HUD -->
+    <div id="dashboard-view" class="page-view">
+        
+        <!-- Dashboard Top Control Header Bar -->
+        <div class="dashboard-header-bar">
+            <button class="interactive-hover-btn" style="padding: 6px 16px; font-size: 0.82rem;" onclick="showPageView('landing')">
+                <span class="btn-text">← Back to Overview</span>
+                <div class="btn-hover-content">
+                    <span>← Back to Overview</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+                </div>
+                <div class="btn-bg-expand"></div>
+            </button>
+
+            <div class="view-selector">
+                <button class="interactive-hover-btn view-btn active" id="btn-view-bev" onclick="setDashboardView('bev')">
+                    <span class="btn-text">LiDAR BEV Grid</span>
+                    <div class="btn-hover-content">
+                        <span>LiDAR BEV Grid</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+                <button class="interactive-hover-btn view-btn" id="btn-view-cam" onclick="setDashboardView('camera')">
+                    <span class="btn-text">Camera Foveation</span>
+                    <div class="btn-hover-content">
+                        <span>Camera Foveation</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+                <button class="interactive-hover-btn view-btn" id="btn-view-dual" onclick="setDashboardView('dual')">
+                    <span class="btn-text">Dual-Sensor Split</span>
+                    <div class="btn-hover-content">
+                        <span>Dual-Sensor Split</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+            </div>
+
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span>ORIN-ECU-01 ONLINE</span>
             </div>
         </div>
 
-        <!-- Center Panel: Unified Dual Viewport (Canvas / WebGL HUD) -->
-        <div class="panel viewport-panel" id="viewport-container">
-            <div class="hud-overlay">
-                <div class="hud-pill" id="hud-mode">VIEW: 3-RING LIDAR BEV EGO-GRID</div>
-                <div class="hud-pill" id="hud-ego-pos">X: 0.00m | Y: 0.00m | Yaw: 0.0°</div>
-                <div class="hud-pill highlight" id="hud-foveation-savings">⚡ Camera Pixel Compute Savings: 79.1%</div>
-            </div>
+        <!-- Main Dashboard 3-Column Layout Container -->
+        <div class="main-container">
+            
+            <!-- Left Panel: Controls, Telemetry & Legend -->
+            <div class="panel">
+                <div class="panel-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    System Controls
+                </div>
 
-            <!-- Single or Split Canvases -->
-            <div class="canvas-wrapper" id="canvas-wrapper">
-                <canvas id="teleop-canvas"></canvas>
-                <canvas id="camera-canvas" class="hidden-canvas"></canvas>
-            </div>
-        </div>
+                <div class="control-group">
+                    <label for="select-cam-source" class="metric-label">Camera Sensor Input</label>
+                    <select id="select-cam-source" class="custom-select" onchange="switchCameraSource(this.value)">
+                        <option value="synthetic" selected>🤖 Synthetic Benchmark Stream</option>
+                        <option value="webcam">📹 Live Physical Webcam Feed</option>
+                    </select>
+                </div>
 
-        <!-- Right Panel: Multi-Language Stack & Camera Foveation Insights -->
-        <div class="panel">
-            <div class="panel-title">📷 Dual-Sensor Camera Foveation</div>
+                <div class="control-group">
+                    <label for="select-motion" class="metric-label">Vehicle Trajectory Mode</label>
+                    <select id="select-motion" class="custom-select" onchange="switchVehicleMotion(this.value)">
+                        <option value="stationary" selected>🅿️ Stationary / Parked (X:0.0m, Y:0.0m)</option>
+                        <option value="circular">🔄 Circular Orbit Simulation</option>
+                    </select>
+                </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Semantic Spatial Masking</div>
-                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-green);" id="stat-mask-roi">50% ROI Retained</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Sky (35%) & Hood (15%) zeroed out instantly</div>
-            </div>
+                <div class="control-group">
+                    <label for="select-points" class="metric-label">LiDAR Point Density</label>
+                    <select id="select-points" class="custom-select" onchange="updatePointDensity(this.value)">
+                        <option value="30000">30,000 pts (Low Power)</option>
+                        <option value="50000">50,000 pts (Balanced)</option>
+                        <option value="80000">80,000 pts (High Res)</option>
+                        <option value="100000" selected>100,000 pts (Full Scan)</option>
+                    </select>
+                </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Optical Flow Motion Gating</div>
-                <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-cyan);" id="stat-flow-hits">72.5% Cache Hits</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Farnebäck motion vectors gate static regions</div>
-            </div>
+                <div class="control-group">
+                    <button id="btn-play-pause" class="interactive-hover-btn action-btn" onclick="toggleSimulation()">
+                        <span class="btn-text">⏸️ Pause Stream</span>
+                        <div class="btn-hover-content">
+                            <span>Pause Stream</span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                        </div>
+                        <div class="btn-bg-expand"></div>
+                    </button>
+                </div>
 
-            <div class="metric-card">
-                <div class="metric-label">3-Ring Resolution Crops</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">
-                    • <b>Near (0-10m)</b>: 1.0x Full Native<br>
-                    • <b>Mid (10-30m)</b>: 0.5x Downsampled<br>
-                    • <b>Far (30-100m)</b>: 0.25x Motion Triggered
+                <div class="panel-title" style="margin-top: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    Telemetry & Benchmarks
+                </div>
+
+                <div class="metric-grid">
+                    <div class="metric-card">
+                        <div class="metric-label">Pipeline Throughput</div>
+                        <div class="metric-val" id="stat-fps">72.3 FPS</div>
+                        <div class="metric-sub" id="stat-fps-sub">Live GPU Benchmark</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">CUDA Ingest Latency</div>
+                        <div class="metric-val" id="stat-latency">1.82 ms</div>
+                        <div class="metric-sub">Sub-2ms Zero Copy</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">Active Points / Scan</div>
+                        <div class="metric-val" id="stat-points">100,000</div>
+                        <div class="metric-sub">Dynamic N Density</div>
+                    </div>
+
+                    <div class="metric-card">
+                        <div class="metric-label">RAM / VRAM Saved</div>
+                        <div class="metric-val" id="stat-memory">-99.1%</div>
+                        <div class="metric-sub">18.4 MB (O(1) SoA)</div>
+                    </div>
+                </div>
+
+                <div class="panel-title" style="margin-top: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    Semantic Ring Legend
+                </div>
+                <div class="legend-list">
+                    <div class="legend-item">
+                        <span><span class="legend-color" style="background:#34d399;"></span>Ground Surface</span>
+                        <span style="color: var(--accent-green);">Drivable (100%)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><span class="legend-color" style="background:#38bdf8;"></span>Near Ring (0 - 10m)</span>
+                        <span style="color: var(--accent-cyan);">5 cm Res</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><span class="legend-color" style="background:#c084fc;"></span>Mid Ring (10 - 30m)</span>
+                        <span style="color: var(--accent-purple);">15 cm Res</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><span class="legend-color" style="background:#fb923c;"></span>Far Ring (30 - 100m)</span>
+                        <span style="color: var(--accent-orange);">50 cm Res</span>
+                    </div>
+                    <div class="legend-item">
+                        <span><span class="legend-color" style="background:#f43f5e;"></span>Dynamic Obstacle</span>
+                        <span style="color: var(--accent-rose);">Car / Pedestrian</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="panel-title" style="margin-top: 6px;">💻 Multi-Language Architecture</div>
+            <!-- Center Panel: Unified Dual Viewport (Canvas / WebGL HUD) -->
+            <div class="panel viewport-panel" id="viewport-container">
+                <div class="hud-overlay">
+                    <div class="hud-pill" id="hud-mode">VIEW: 3-RING LIDAR BEV EGO-GRID</div>
+                    <div class="hud-pill" id="hud-ego-pos">X: 0.00m | Y: 0.00m | Yaw: 0.0°</div>
+                    <div class="hud-pill highlight" id="hud-foveation-savings">⚡ Camera Pixel Compute Savings: 79.1%</div>
+                </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Python (PyTorch / ONNX)</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Offline ML, 3D Backbone & ONNX Export</div>
+                <!-- Canvases -->
+                <div class="canvas-wrapper" id="canvas-wrapper">
+                    <canvas id="teleop-canvas"></canvas>
+                    <canvas id="camera-canvas" class="hidden-canvas"></canvas>
+                </div>
             </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Modern C++17 / C++20</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">Multi-Level Ring Buffer, Zero-GC O(1) Memory</div>
+            <!-- Right Panel: Multi-Language Stack & Camera Foveation Insights -->
+            <div class="panel">
+                <div class="panel-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                    Camera Foveation Engine
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">Semantic Spatial Masking</div>
+                    <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-green);" id="stat-mask-roi">50% ROI Retained</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">Sky (35%) & Hood (15%) zeroed out instantly</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">Optical Flow Motion Gating</div>
+                    <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-cyan);" id="stat-flow-hits">72.5% Cache Hits</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">Farnebäck motion vectors gate static regions</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">3-Ring Resolution Crops</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px; line-height: 1.5;">
+                        • <b style="color: var(--accent-cyan);">Near (0-10m)</b>: 1.0x Native Crop<br>
+                        • <b style="color: var(--accent-purple);">Mid (10-30m)</b>: 0.5x Downsampled<br>
+                        • <b style="color: var(--accent-orange);">Far (30-100m)</b>: 0.25x Motion Gated
+                    </div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">Trained Vehicle Intelligence</div>
+                    <div class="metric-val" style="font-size: 1.1rem; color: var(--accent-cyan);" id="stat-vehicle-info">— vehicles • —</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;" id="stat-vehicle-sub">Run python/train_perception_models.py to populate</div>
+                </div>
+
+                <div class="panel-title" style="margin-top: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                    Multi-Language Stack
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">Python (PyTorch / ONNX)</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">Offline ML, 3D Backbone & ONNX Export</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">Modern C++17 / C++20</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">Multi-Level Ring Buffer, Zero-GC O(1) Memory</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">CUDA C++ Kernels</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">3D-to-2.5D Elevation Projection (&lt;1.82ms)</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-label">C++ TensorRT & ROS 2</div>
+                    <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:4px;">INT8 Hardware Graph Fusion & Low Latency Topics</div>
+                </div>
             </div>
 
-            <div class="metric-card">
-                <div class="metric-label">CUDA C++ Kernels</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">3D-to-2.5D Elevation Projection (&lt;1.82ms)</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">C++ TensorRT Runtime & ROS 2</div>
-                <div style="font-size:0.8rem; color:#cbd5e1; margin-top:4px;">INT8 Hardware Graph Fusion & Low Latency Topic</div>
-            </div>
         </div>
-
     </div>
 
     <script src="teleop_dashboard.js"></script>
