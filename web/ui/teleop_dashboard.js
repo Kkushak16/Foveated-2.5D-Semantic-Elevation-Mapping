@@ -32,13 +32,56 @@ class RealtimeMotionAnalyzer {
         this._motionRatioEma = 0;     // smoothed motion energy (kills single-frame spikes)
         this._emaAlpha = 0.35;
 
+        // --- Master-file tracking model (00_master_context.md) ---
+        // Per-target temporal confidence: NOT an occupancy probability, just a
+        // "recently and consistently observed" validity signal.
+        //   w_new = w_old + 1 on re-observation; w *= exp(-lambda*dt) otherwise,
+        //   lambda = k * egoSpeed (stale faster when ego moves faster).
+        // Cross-modal fusion baseline weights: LiDAR 0.7 / image 0.3.
+        this.trackId = 0;             // stable ID while continuously tracked
+        this.trackConfidence = 0;     // temporal validity weight w
+        this.trackRange = null;       // stable 'near' | 'mid' | 'far'
+        this._rangeScoreEma = 0;      // smoothed monocular range score
+        this._rangeHold = 0;          // frames since last band switch (overlap hysteresis)
+        this.FUSION_W_LIDAR = 0.7;
+        this.FUSION_W_IMAGE = 0.3;
+
         // Frame throttling: run heavy getImageData only every N frames
         this._tick = 0;
         this._frameSkip = 2;          // Analyze at up to 30 FPS while rendering at display refresh rate.
         this._lastResult = { motionDetected: false, box: null, motionRatio: 0, activePixelsPct: 0 };
     }
 
-    analyze(sourceElem, fullWidth, fullHeight, roiMinYRatio = 0.35, roiMaxYRatio = 0.85) {
+    /**
+     * Monocular range band from a tracked box (master-file 3-ring design with
+     * 12% overlap hysteresis so NEAR/MID/FAR cannot flicker at boundaries).
+     * Perspective prior: closer cars sit LOWER in the ROI and cover MORE pixels.
+     * Score in [0,1] (1 = very near). Returns { band, score }.
+     */
+    estimateRangeBand(box, fullWidth, fullHeight, roiMinYRatio = 0.35, roiMaxYRatio = 0.85) {
+        const roiTop = fullHeight * roiMinYRatio;
+        const roiBot = fullHeight * roiMaxYRatio;
+        const bottomY = box.y + box.h;
+        const d = Math.min(1, Math.max(0, (bottomY - roiTop) / Math.max(1, roiBot - roiTop)));
+        const areaFrac = (box.w * box.h) / Math.max(1, fullWidth * fullHeight);
+        const sizeNorm = Math.min(1, areaFrac / 0.12);
+        const score = 0.55 * d + 0.45 * sizeNorm;
+
+        const cur = this.trackRange;
+        let band;
+        if (cur === 'near') {
+            band = score >= 0.48 ? 'near' : (score >= 0.22 ? 'mid' : 'far');
+        } else if (cur === 'mid') {
+            band = score >= 0.68 ? 'near' : (score >= 0.24 ? 'mid' : 'far');
+        } else if (cur === 'far') {
+            band = score >= 0.70 ? 'near' : (score >= 0.40 ? 'mid' : 'far');
+        } else {
+            band = score >= 0.60 ? 'near' : (score >= 0.32 ? 'mid' : 'far');
+        }
+        return { band, score };
+    }
+
+    analyze(sourceElem, fullWidth, fullHeight, roiMinYRatio = 0.35, roiMaxYRatio = 0.85, egoSpeed = 0) {
         if (!sourceElem) {
             this.smoothedBox = null;
             this.boxOpacity = 0;
@@ -46,7 +89,11 @@ class RealtimeMotionAnalyzer {
             this._confirmCount = 0;
             this._releaseCount = 0;
             this._motionRatioEma = 0;
-            return { motionDetected: false, stableTracking: false, box: null, motionRatio: 0, activePixelsPct: 0, boxOpacity: 0 };
+            this.trackConfidence = 0;
+            this.trackRange = null;
+            this._rangeScoreEma = 0;
+            this._rangeHold = 0;
+            return { motionDetected: false, stableTracking: false, box: null, motionRatio: 0, activePixelsPct: 0, boxOpacity: 0, rangeBand: null, rangeScore: 0, trackId: this.trackId, trackConfidence: 0 };
         }
 
         this._tick++;
@@ -75,7 +122,7 @@ class RealtimeMotionAnalyzer {
         if (!this.prevLuma) {
             this.prevLuma = currLuma;
             this.smoothedBox = null;
-            this._lastResult = { motionDetected: false, stableTracking: false, box: null, motionRatio: 0, activePixelsPct: 0 };
+            this._lastResult = { motionDetected: false, stableTracking: false, box: null, motionRatio: 0, activePixelsPct: 0, rangeBand: null, rangeScore: 0, trackId: this.trackId, trackConfidence: 0 };
             return { ...this._lastResult, boxOpacity: 0 };
         }
 
@@ -178,6 +225,7 @@ class RealtimeMotionAnalyzer {
 
                 if (!this.smoothedBox) {
                     this.smoothedBox = { ...rawBox };
+                    this.trackId++;
                 } else {
                     // EMA removes frame-to-frame detector jitter while still following a target.
                     this.smoothedBox.x += (rawBox.x - this.smoothedBox.x) * this.alpha;
@@ -186,16 +234,45 @@ class RealtimeMotionAnalyzer {
                     this.smoothedBox.h += (rawBox.h - this.smoothedBox.h) * this.alpha;
 
                 }
+
+                // Master-file confidence: accumulate on re-observation (cap 20).
+                this.trackConfidence = Math.min(20, this.trackConfidence + 1);
+
+                // Master-file range band with overlap hysteresis + switch debounce:
+                // a new band must win 3 straight analysis frames before it sticks.
+                const est = this.estimateRangeBand(this.smoothedBox, fullWidth, fullHeight, roiMinYRatio, roiMaxYRatio);
+                this._rangeScoreEma += (est.score - this._rangeScoreEma) * 0.5;
+                if (est.band !== this.trackRange) {
+                    this._rangeHold++;
+                    if (this._rangeHold >= 3) {
+                        this.trackRange = est.band;
+                        this._rangeHold = 0;
+                    }
+                } else {
+                    this._rangeHold = 0;
+                }
+                if (!this.trackRange) this.trackRange = est.band;
+            } else {
+                // Coasting: decay confidence, lambda scales with ego speed.
+                const lambda = 0.08 + 0.6 * Math.min(2, Math.abs(egoSpeed || 0));
+                this.trackConfidence *= Math.exp(-lambda * 0.1);
             }
             // Fade box IN smoothly (holds while coasting through release window)
             this.boxOpacity = Math.min(1, this.boxOpacity + 0.18);
         } else {
             // Fade OUT box smoothly — no sudden disappearance
             this.boxOpacity = Math.max(0, this.boxOpacity - 0.06);
-            if (this.boxOpacity === 0) this.smoothedBox = null;
+            const lambda = 0.08 + 0.6 * Math.min(2, Math.abs(egoSpeed || 0));
+            this.trackConfidence *= Math.exp(-lambda * 0.1);
+            if (this.boxOpacity === 0) {
+                this.smoothedBox = null;
+                this.trackRange = null;
+                this._rangeHold = 0;
+            }
         }
 
-        this._lastResult = { motionDetected, stableTracking: motionDetected, box: this.smoothedBox, motionRatio, activePixelsPct: (filteredMotionCount / (this.cols * this.rows)) * 100 };
+        const trackConfNorm = Math.min(1, this.trackConfidence / 8);
+        this._lastResult = { motionDetected, stableTracking: motionDetected, box: this.smoothedBox, motionRatio, activePixelsPct: (filteredMotionCount / (this.cols * this.rows)) * 100, rangeBand: this.trackRange, rangeScore: this._rangeScoreEma, trackId: this.trackId, trackConfidence: trackConfNorm };
         return { ...this._lastResult, boxOpacity: this.boxOpacity };
     }
 }
@@ -223,6 +300,11 @@ class UnifiedTeleopEngine {
         this.webcamActive = false;
         this.motionAnalyzer = new RealtimeMotionAnalyzer(80, 45);
 
+        // --- Cross-modal BEV projection state ---
+        this.sweepAngle = 0;        // rotating LiDAR sweep beam (always spins)
+        this.cameraTargets = [];    // [{bearing01, rangeBand, color, conf}] from camera
+        this.lastRangeBand = null;  // last stable camera range for HUD pill
+
         // --- Real-time performance measurement ---
         this._lastFrameTime = null;   // timestamp of previous rAF tick
         this._fpsEma = 60.0;          // Exponential moving average of FPS
@@ -234,7 +316,10 @@ class UnifiedTeleopEngine {
         this._lastFlowLabel = '';
         this._lastMaskLabel = '';
         this._lastHudSavings = '';
+        this._lastRangeStr = '';
         this._lastHudTick = 0;
+        this._depthBannerVisible = false;
+        this._depthBannerEl = null;
 
         this.init();
     }
@@ -400,6 +485,27 @@ class UnifiedTeleopEngine {
         this.drawLidarBEV();
         this.drawCameraFoveation();
         this._updatePipelineTelemetry();
+        this.updateDepthBanner();
+    }
+
+    /**
+     * Shows the monocular-depth disclaimer ticker only while the LIVE physical
+     * camera is streaming and its canvas is on screen. Hidden for synthetic
+     * stream, paused/error states, and BEV-only view. Cached to avoid DOM churn.
+     */
+    updateDepthBanner() {
+        if (!this._depthBannerEl) {
+            this._depthBannerEl = document.getElementById('depth-ticker');
+            if (!this._depthBannerEl) return;
+        }
+        const el = this._depthBannerEl;
+        const camVisible = !this.camCanvas.classList.contains('hidden-canvas');
+        const live = this.cameraSource === 'webcam' && this.webcamActive &&
+            this.videoElem.readyState >= 2 && camVisible;
+        if (live !== this._depthBannerVisible) {
+            this._depthBannerVisible = live;
+            el.classList.toggle('visible', live);
+        }
     }
 
     /**
@@ -492,6 +598,8 @@ class UnifiedTeleopEngine {
         ctx.stroke();
 
         // Point Cloud Generation - In Stationary Mode, points remain FIXED relative to ground!
+        // Legend mapping (Semantic Ring Legend): ground #34d399, near #38bdf8,
+        // mid #c084fc, far #fb923c, dynamic obstacle #f43f5e.
         const numPoints = Math.min(600, Math.floor(this.pointDensity / 150));
         const rotationAngle = (this.motionMode === 'circular') ? (this.frame * 0.005) : 0; // NO spinning in stationary mode!
 
@@ -505,22 +613,73 @@ class UnifiedTeleopEngine {
             const py = cy + Math.sin(angle) * dist * scale * 2;
 
             if (dist <= 10) {
-                // Near Ring (5cm resolution - Drivable Surface) — matches legend #38bdf8
-                ctx.fillStyle = '#38bdf8';
-                ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+                // Near field: drivable ground surface (green) with cyan ring markers
+                // interleaved so BOTH legend entries are visible in the 3-ring grid.
+                if (i % 3 === 0) {
+                    ctx.fillStyle = '#34d399';
+                    ctx.fillRect(px - 1, py - 1, 2, 2);
+                } else {
+                    ctx.fillStyle = '#38bdf8';
+                    ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+                }
             } else if (dist <= 30) {
                 // Mid Ring (15cm resolution) — matches legend #c084fc
                 ctx.fillStyle = '#c084fc';
                 ctx.fillRect(px - 1, py - 1, 2, 2);
             } else {
                 // Far Ring (50cm resolution) — matches legend #fb923c
-                // (was #4ade80 green, which matched nothing in the legend)
                 ctx.fillStyle = '#fb923c';
                 ctx.fillRect(px - 0.5, py - 0.5, 1, 1);
             }
         }
 
-        // Draw Dynamic Obstacles ONLY if circular motion mode is selected
+        // Rotating LiDAR sweep beam — always spins (both stationary + circular),
+        // cyan core with green leading edge so the green/blue rings read clearly.
+        this.sweepAngle = (this.sweepAngle + 0.035) % (Math.PI * 2);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(this.sweepAngle);
+        const sweepLen = Math.min(w, h) / 2;
+        const sweepGrad = ctx.createLinearGradient(0, 0, sweepLen, 0);
+        sweepGrad.addColorStop(0, 'rgba(56, 189, 248, 0.45)');
+        sweepGrad.addColorStop(0.7, 'rgba(52, 211, 153, 0.18)');
+        sweepGrad.addColorStop(1, 'rgba(52, 211, 153, 0)');
+        ctx.fillStyle = sweepGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, sweepLen, -0.09, 0.09);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(0.09) * sweepLen, Math.sin(0.09) * sweepLen);
+        ctx.stroke();
+        ctx.restore();
+
+        // Camera-fused dynamic obstacles: every live camera track is projected
+        // into the BEV at its range band (near 6m / mid 20m / far 60m) and
+        // bearing from the box center-x, drawn in the matching ring color with
+        // a red dynamic outline. Works in BOTH motion modes.
+        const RANGE_DIST = { near: 6, mid: 20, far: 60 };
+        const RANGE_COLOR = { near: '#38bdf8', mid: '#c084fc', far: '#fb923c' };
+        for (const t of this.cameraTargets) {
+            const dist = RANGE_DIST[t.rangeBand] || 20;
+            const bearing = (t.bearing01 - 0.5) * Math.PI; // -90°..+90° across FOV
+            const ox = cx + Math.sin(bearing) * dist * scale * 2;
+            const oy = cy - Math.cos(bearing) * dist * scale * 2;
+            ctx.fillStyle = RANGE_COLOR[t.rangeBand] || '#f43f5e';
+            ctx.fillRect(ox - 4, oy - 4, 8, 8);
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(ox - 6, oy - 6, 12, 12);
+            ctx.fillStyle = RANGE_COLOR[t.rangeBand] || '#f43f5e';
+            ctx.font = 'bold 10px JetBrains Mono, monospace';
+            ctx.fillText(t.rangeBand ? t.rangeBand.toUpperCase() : '??', ox + 9, oy + 4);
+        }
+
+        // Demo obstacles in circular orbit mode (kept alongside camera tracks)
         if (this.motionMode === 'circular') {
             for (let o = 0; o < 4; o++) {
                 const oAngle = (o * 90 + this.frame * 0.8) * (Math.PI / 180);
@@ -617,11 +776,39 @@ class UnifiedTeleopEngine {
         // Real-time motion analysis (throttled internally) + debounced HUD labels.
         // Stable (hysteresis) state drives ALL text so the banner cannot flicker
         // STATIC<->TRACKING on every frame while something moves.
-        const analysis = this.motionAnalyzer.analyze(sourceElem, w, h, 0.35, 0.85);
+        const egoSpeed = this.motionMode === 'circular' ? 1.0 : 0.0;
+        const analysis = this.motionAnalyzer.analyze(sourceElem, w, h, 0.35, 0.85, egoSpeed);
 
         // motionFactor scaled *6 (was *15 — caused huge overreaction to tiny motion)
         const motionFactor = Math.min(1.0, analysis.motionRatio * 6);
         const dynamicPixelSavings = 85.0 - (motionFactor * 22.5);
+
+        // Range band presentation: color + label per master-file 3-ring design.
+        const RANGE_META = {
+            near: { color: '#38bdf8', tag: 'NEAR 0–10m • 1.0x', dist: '0–10m' },
+            mid:  { color: '#c084fc', tag: 'MID 10–30m • 0.5x', dist: '10–30m' },
+            far:  { color: '#fb923c', tag: 'FAR 30–100m • 0.25x', dist: '30–100m' },
+        };
+        const bandMeta = RANGE_META[analysis.rangeBand] || null;
+
+        // Project the tracked car into the BEV (bearing from box center-x).
+        // Fusion note (master file): LiDAR 0.7 / image 0.3 baseline weights —
+        // camera gives bearing+range band, LiDAR owns exact geometry.
+        if (analysis.motionDetected && analysis.box && boxOpacityPending(analysis)) {
+            const b = analysis.box;
+            this.cameraTargets = [{
+                bearing01: Math.min(1, Math.max(0, (b.x + b.w / 2) / Math.max(1, w))),
+                rangeBand: analysis.rangeBand || 'mid',
+                color: bandMeta ? bandMeta.color : '#c084fc',
+                conf: analysis.trackConfidence ?? 0,
+            }];
+            this.lastRangeBand = analysis.rangeBand;
+        } else if (!analysis.motionDetected) {
+            this.cameraTargets = [];
+            this.lastRangeBand = null;
+        }
+
+        function boxOpacityPending(a) { return (a.boxOpacity ?? (a.motionDetected ? 1 : 0)) > 0; }
 
         // Throttle DOM writes: values rounded to whole % + only write on change.
         // Banner at ~10Hz max so it reads stable while motion continues.
@@ -651,10 +838,11 @@ class UnifiedTeleopEngine {
         const roiTrackingPct  = analysis.motionDetected ? Math.min(65, 50 + Math.round(motionFactor * 15)) : 50;
 
         if (analysis.motionDetected) {
-            const flowLabel = `${realCacheHitPct}% Cache Hits (Tracking)`;
-            const maskLabel = `${roiTrackingPct}% ROI Active (Tracking)`;
-            if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = '#f43f5e'; this._lastFlowLabel = flowLabel; }
-            if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = '#f43f5e'; this._lastMaskLabel = maskLabel; }
+            const rangeTxt = bandMeta ? ` • ${bandMeta.tag}` : '';
+            const flowLabel = `${realCacheHitPct}% Cache Hits (Tracking${bandMeta ? ' ' + analysis.rangeBand.toUpperCase() : ''})`;
+            const maskLabel = `${roiTrackingPct}% ROI Active (Tracking${rangeTxt})`;
+            if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastFlowLabel = flowLabel; }
+            if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastMaskLabel = maskLabel; }
         } else {
             const flowLabel = `${realCacheHitPct}% Cache Hits (Static)`;
             const maskLabel = '50% ROI Retained (Static)';
@@ -662,24 +850,43 @@ class UnifiedTeleopEngine {
             if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = 'var(--accent-green)'; this._lastMaskLabel = maskLabel; }
         }
 
-        // Bounding box with smooth opacity fade — no hard jump, no Math.max size clamp
+        // HUD range pill: explicit NEAR / MID / FAR readout for the tracked car.
+        const hudRange = document.getElementById('hud-range');
+        if (hudRange) {
+            const rangeStr = analysis.motionDetected && bandMeta
+                ? `🚗 CAR: ${analysis.rangeBand.toUpperCase()} (${bandMeta.dist}) • conf ${(analysis.trackConfidence ?? 0).toFixed(2)} • LiDAR 0.7 / IMG 0.3`
+                : '🚗 CAR: NO TARGET IN ROI';
+            if (rangeStr !== this._lastRangeStr) {
+                hudRange.innerText = rangeStr;
+                hudRange.style.color = bandMeta && analysis.motionDetected ? bandMeta.color : '';
+                this._lastRangeStr = rangeStr;
+            }
+        }
+
+        // Tracked-car box in its RANGE color — answers "which ring is the car in"
+        // at a glance. Label carries range + temporal confidence (master file).
         const boxOpacity = analysis.boxOpacity ?? (analysis.motionDetected ? 1 : 0);
         if (boxOpacity > 0 && analysis.box) {
             const b = analysis.box;
+            const ringColor = bandMeta ? bandMeta.color : '#f43f5e';
+            const confTxt = (analysis.trackConfidence ?? 0).toFixed(2);
+            const rangeTxt = analysis.rangeBand ? analysis.rangeBand.toUpperCase() : '…';
+            const label = `🚗 CAR • ${rangeTxt} #${analysis.trackId ?? 0} • conf ${confTxt}`;
             ctx.save();
             ctx.globalAlpha = boxOpacity;
-            ctx.shadowColor = '#f43f5e';
+            ctx.shadowColor = ringColor;
             ctx.shadowBlur = 12;
-            ctx.strokeStyle = '#f43f5e';
+            ctx.strokeStyle = ringColor;
             ctx.lineWidth = 2.5;
             ctx.strokeRect(b.x, b.y, b.w, b.h);
             ctx.shadowBlur = 0;
             const labelY = Math.max(0, b.y - 22);
-            ctx.fillStyle = '#f43f5e';
-            ctx.fillRect(b.x, labelY, 210, 22);
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = ringColor;
+            const labelW = Math.max(230, label.length * 7.2);
+            ctx.fillRect(b.x, labelY, labelW, 22);
+            ctx.fillStyle = '#040405';
             ctx.font = 'bold 11px monospace';
-            ctx.fillText('🔴 FLOW GATED: MOTION TARGET', b.x + 4, labelY + 15);
+            ctx.fillText(label, b.x + 4, labelY + 15);
             ctx.restore();
         } else {
             // SCENE CLEAR BADGE
@@ -695,22 +902,52 @@ class UnifiedTeleopEngine {
             ctx.fillText('🟢 SCENE CLEAR: NO DYNAMIC MOTION DETECTED (0 Objects)', w * 0.22 + 12, h * 0.52 + 22);
         }
 
-        // 3-Ring Crop Resolution Overlay — colors match the Semantic Ring Legend
-        // Near cyan #38bdf8 / Mid purple #c084fc / Far orange #fb923c.
+        // 3-Ring perspective bands drawn ON the road (trapezoids converging to the
+        // vanishing point) — near = bottom/wide, far = top/narrow. Colors match
+        // the Semantic Ring Legend: near cyan #38bdf8 / mid purple #c084fc /
+        // far orange #fb923c. The ACTIVE band (where the tracked car sits) is
+        // filled; the others stay outlines so the rings are actually useful.
+        const vpx = w * 0.5, vpy = h * 0.42;   // vanishing point
+        const yFar0 = h * 0.42, yFar1 = h * 0.52;   // FAR  30–100m
+        const yMid0 = h * 0.52, yMid1 = h * 0.68;   // MID  10–30m
+        const yNear0 = h * 0.68, yNear1 = h * 0.85; // NEAR  0–10m
+        const spreadAt = (y) => {
+            const t = Math.min(1, Math.max(0, (y - vpy) / Math.max(1, h * 0.85 - vpy)));
+            return 0.06 + t * 0.38;
+        };
+        const bandPath = (y0, y1) => {
+            const s0 = spreadAt(y0), s1 = spreadAt(y1);
+            ctx.beginPath();
+            ctx.moveTo(vpx - s0 * w, y0);
+            ctx.lineTo(vpx + s0 * w, y0);
+            ctx.lineTo(vpx + s1 * w, y1);
+            ctx.lineTo(vpx - s1 * w, y1);
+            ctx.closePath();
+        };
+        const activeBand = analysis.motionDetected ? analysis.rangeBand : null;
+        const bands = [
+            { key: 'far', y0: yFar0, y1: yFar1, color: '#fb923c', label: 'FAR 30–100m • 0.25x' },
+            { key: 'mid', y0: yMid0, y1: yMid1, color: '#c084fc', label: 'MID 10–30m • 0.5x' },
+            { key: 'near', y0: yNear0, y1: yNear1, color: '#38bdf8', label: 'NEAR 0–10m • 1.0x' },
+        ];
         ctx.lineWidth = 1.5;
         ctx.font = '11px Inter, sans-serif';
-        ctx.strokeStyle = '#38bdf8';
-        ctx.strokeRect(w * 0.2, h * 0.65, w * 0.6, h * 0.18);
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillText('NEAR CROP: 1.0x Full Res Native', w * 0.2 + 6, h * 0.65 + 16);
-        ctx.strokeStyle = '#c084fc';
-        ctx.strokeRect(w * 0.28, h * 0.45, w * 0.44, h * 0.16);
-        ctx.fillStyle = '#c084fc';
-        ctx.fillText('MID CROP: 0.5x', w * 0.28 + 6, h * 0.45 + 14);
-        ctx.strokeStyle = '#fb923c';
-        ctx.strokeRect(w * 0.36, h * 0.38, w * 0.28, h * 0.10);
-        ctx.fillStyle = '#fb923c';
-        ctx.fillText('FAR: 0.25x', w * 0.36 + 6, h * 0.38 + 14);
+        for (const bd of bands) {
+            bandPath(bd.y0, bd.y1);
+            if (activeBand === bd.key) {
+                ctx.fillStyle = bd.color + '2E'; // ~18% fill on the active band
+                ctx.fill();
+                ctx.strokeStyle = bd.color;
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+                ctx.lineWidth = 1.5;
+            } else {
+                ctx.strokeStyle = bd.color + 'AA';
+                ctx.stroke();
+            }
+            ctx.fillStyle = bd.key === activeBand ? bd.color : bd.color + 'CC';
+            ctx.fillText((bd.key === activeBand ? '▶ ' : '') + bd.label, vpx - spreadAt(bd.y1) * w + 6, (bd.y0 + bd.y1) / 2);
+        }
     }
 }
 

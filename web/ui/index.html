@@ -431,12 +431,22 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <div class="hud-pill" id="hud-mode">VIEW: 3-RING LIDAR BEV EGO-GRID</div>
                     <div class="hud-pill" id="hud-ego-pos">X: 0.00m | Y: 0.00m | Yaw: 0.0°</div>
                     <div class="hud-pill highlight" id="hud-foveation-savings">⚡ Camera Pixel Compute Savings: 79.1%</div>
+                    <div class="hud-pill" id="hud-range">🚗 CAR: NO TARGET IN ROI</div>
                 </div>
 
                 <!-- Canvases -->
                 <div class="canvas-wrapper" id="canvas-wrapper">
                     <canvas id="teleop-canvas"></canvas>
                     <canvas id="camera-canvas" class="hidden-canvas"></canvas>
+                </div>
+
+                <!-- Monocular-depth disclaimer ticker: visible only while the live
+                     physical camera is streaming (auto-hidden otherwise). -->
+                <div class="depth-ticker" id="depth-ticker" aria-live="polite">
+                    <div class="depth-ticker-track">
+                        <span>⚠️ Range is a monocular heuristic (position + size), not true depth — a large truck far away can read a band nearer than it is. True metric depth needs the LiDAR-camera extrinsic calibration from the C++ pipeline.&nbsp;&nbsp;&nbsp;•&nbsp;&nbsp;&nbsp;</span>
+                        <span aria-hidden="true">⚠️ Range is a monocular heuristic (position + size), not true depth — a large truck far away can read a band nearer than it is. True metric depth needs the LiDAR-camera extrinsic calibration from the C++ pipeline.&nbsp;&nbsp;&nbsp;•&nbsp;&nbsp;&nbsp;</span>
+                    </div>
                 </div>
             </div>
 

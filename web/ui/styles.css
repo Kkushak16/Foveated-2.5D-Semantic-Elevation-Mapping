@@ -518,6 +518,44 @@ canvas {
     display: none !important;
 }
 
+/* Monocular-depth disclaimer ticker: pinned to the viewport bottom, shown only
+   while the live physical camera streams (JS toggles .visible). */
+.depth-ticker {
+    display: none;
+    width: 100%;
+    margin-top: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    background: rgba(245, 158, 11, 0.08);
+    border-radius: 8px;
+    padding: 7px 0;
+    font-size: 0.78rem;
+    font-family: var(--font-mono);
+    color: var(--accent-gold);
+}
+
+.depth-ticker.visible {
+    display: block;
+}
+
+.depth-ticker-track {
+    display: inline-flex;
+    animation: depth-ticker-scroll 28s linear infinite;
+    will-change: transform;
+}
+
+@keyframes depth-ticker-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .depth-ticker-track {
+        animation: none;
+    }
+}
+
 /* HUD Overlay Elements */
 .hud-overlay {
     position: absolute;

@@ -114,3 +114,52 @@ test('does not treat a uniform webcam exposure adjustment as motion', () => {
 
     assert.equal(result.motionDetected, false);
 });
+
+test('estimates NEAR/MID/FAR range bands with overlap hysteresis', () => {
+    const { analyzer } = createAnalyzer();
+    const W = 800, H = 450;
+
+    // Big low box = very near; tiny high box = far.
+    const nearBox = { x: 300, y: 300, w: 260, h: 120 };
+    const farBox = { x: 380, y: 160, w: 40, h: 22 };
+
+    analyzer.trackRange = null;
+    assert.equal(analyzer.estimateRangeBand(nearBox, W, H).band, 'near');
+    analyzer.trackRange = null;
+    assert.equal(analyzer.estimateRangeBand(farBox, W, H).band, 'far');
+
+    // Overlap hysteresis: a mid-score box does not yank a NEAR track out.
+    analyzer.trackRange = 'near';
+    const hold = analyzer.estimateRangeBand({ x: 300, y: 230, w: 120, h: 60 }, W, H);
+    assert.ok(['near', 'mid'].includes(hold.band));
+    assert.notEqual(
+        analyzer.estimateRangeBand({ x: 300, y: 300, w: 260, h: 120 }, W, H).band,
+        'far',
+        'a clearly-near box must never read FAR'
+    );
+});
+
+test('tracked result carries range band + confidence for BEV fusion', () => {
+    const { analyzer, setPixel } = createAnalyzer();
+    const source = {};
+
+    analyzer.analyze(source, 800, 450);
+    analyzer.analyze(source, 800, 450);
+    for (let row = 30; row < 36; row++) {
+        for (let column = 30; column < 50; column++) setPixel(row, column, 255);
+    }
+    let result = analyzer.analyze(source, 800, 450);
+    for (let i = 0; i < 5; i++) {
+        analyzer.analyze(source, 800, 450);
+        const v = (i % 2 === 0) ? 140 : 255;
+        for (let row = 30; row < 36; row++) {
+            for (let column = 30; column < 50; column++) setPixel(row, column, v);
+        }
+        result = analyzer.analyze(source, 800, 450, 0.35, 0.85, 0);
+    }
+
+    assert.equal(result.motionDetected, true);
+    assert.ok(['near', 'mid', 'far'].includes(result.rangeBand), 'range band must be set');
+    assert.ok(result.trackConfidence > 0, 'confidence accumulates on re-observation');
+    assert.ok(result.trackId >= 1, 'stable track ID assigned');
+});
