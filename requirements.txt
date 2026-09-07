@@ -26,5 +26,14 @@ colorama>=0.4
 # ndrplz-style steering CNN needs torch; ahmetozlu-style counting needs opencv.
 # All are optional at runtime (stub fallbacks) — install to train for real.
 # torch>=2.0
+# torchvision>=0.15
 # opencv-python>=4.8
 pillow>=9.0
+
+# YOLOv5 vehicle detection (optional — uncomment to enable deep detection)
+# Enables VehicleCounter to detect stationary vehicles, not just moving ones.
+# torch>=2.0          # PyTorch (required for YOLOv5)
+# torchvision>=0.15   # Required by YOLOv5
+# ultralytics         # YOLOv5 hub integration
+# opencv-python>=4.8  # Needed for frame processing & annotation
+# seaborn>=0.11       # YOLOv5 training visualisation

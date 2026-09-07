@@ -27,10 +27,13 @@ import argparse
 import json
 import os
 
+import numpy as np
+
 try:
-    import numpy as np
-except ImportError:  # pragma: no cover
-    np = None
+    import torch
+except ImportError:
+    torch = None
+
 
 try:
     import cv2
@@ -82,10 +85,34 @@ def classify_pil_color(pil_img):
 
 
 # --- Vehicle counter (ahmetozlu-style ROI-line counting) --------------------
-class VehicleCounter:
-    """Centroid-tracking line counter. `line_y` is the ROI counting line."""
+# COCO class IDs that correspond to vehicles
+_COCO_VEHICLE_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
 
-    def __init__(self, line_y_ratio=0.6, min_area=800, max_disappeared=8):
+
+class VehicleCounter:
+    """Centroid‐tracking line counter with optional deep detector.
+
+    By default the original frame‐diff approach is used (fast, no extra deps).
+    If the environment has ``torch`` and a compatible detection model is
+    available, the ``detect_vehicles`` helper will be used instead – this
+    dramatically improves detection of stationary objects (e.g. a car
+    parked directly in front of the camera) because it no longer relies on
+    motion.
+
+    Parameters
+    ----------
+    model_path : str or None
+        Path to a custom YOLOv5 ``best.pt`` weights file.  When provided the
+        model is loaded via ``torch.hub.load('ultralytics/yolov5', 'custom',
+        path=model_path, force_reload=True)`` and *all* detected classes are
+        accepted (the custom model is assumed to output only the classes you
+        trained for).  When ``None`` (default) the pretrained ``yolov5s`` COCO
+        model is used and results are filtered to vehicle classes only
+        (car, motorcycle, bus, truck).
+    """
+
+    def __init__(self, line_y_ratio=0.6, min_area=800, max_disappeared=8,
+                 model_path=None):
         self.line_y_ratio = line_y_ratio
         self.min_area = min_area
         self.max_disappeared = max_disappeared
@@ -94,8 +121,56 @@ class VehicleCounter:
         self.next_id = 0
         self.total_count = 0
         self.colors_seen = []
+        self.model_path = model_path
+        self._is_custom_model = model_path is not None
+        # Load optional deep detector if torch is available
+        self.torch = None
+        if torch is not None:
+            try:
+                if model_path is not None:
+                    # Custom trained model — use force_reload to bypass cache
+                    self.torch = torch.hub.load(
+                        'ultralytics/yolov5', 'custom',
+                        path=model_path, force_reload=True)
+                else:
+                    # Pretrained COCO model (default)
+                    self.torch = torch.hub.load(
+                        'ultralytics/yolov5', 'yolov5s',
+                        pretrained=True, force_reload=True)
+                self.torch.conf = 0.25  # lower confidence threshold for small cars
+            except Exception as e:
+                print(f"[WARN] Torch detector load failed: {e}")
+                self.torch = None
+
+
 
     def _detect(self, frame):
+        # Fast frame‑diff detection (fallback)
+        # Try deep detector first if available – it works even for static cars
+        if self.torch is not None:
+            try:
+                results = self.torch(frame)
+                # results.xyxy[0] is Nx6 tensor: (x1, y1, x2, y2, conf, cls)
+                boxes = []
+                for *xyxy, conf, cls in results.xyxy[0].cpu().numpy():
+                    if conf < 0.25:
+                        continue
+                    # For pretrained COCO model, filter to vehicle classes only;
+                    # for custom models, accept all classes (user trained for
+                    # their specific targets).
+                    if not self._is_custom_model and int(cls) not in _COCO_VEHICLE_CLASSES:
+                        continue
+                    x1, y1, x2, y2 = map(int, xyxy)
+                    w, h = x2 - x1, y2 - y1
+                    if w * h < self.min_area:
+                        continue
+                    boxes.append((x1, y1, w, h))
+                if boxes:
+                    return boxes
+            except Exception as e:
+                print(f"[WARN] Torch detection failed: {e}")
+                # fall back to the motion diff detector below
+        # Fast frame‑diff detection (fallback)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         if self.prev_gray is None:
@@ -112,7 +187,30 @@ class VehicleCounter:
                 continue
             x, y, w, h = cv2.boundingRect(c)
             boxes.append((x, y, w, h))
+        # If no moving blobs were found, try a simple color‑based static car detector (red cars)
+        if not boxes:
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            # Red has two hue ranges in HSV
+            lower_red1 = np.array([0, 70, 60])
+            upper_red1 = np.array([10, 255, 255])
+            lower_red2 = np.array([170, 70, 60])
+            upper_red2 = np.array([180, 255, 255])
+            mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+            mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+            mask = cv2.bitwise_or(mask1, mask2)
+            # Clean up small noise
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for c in contours:
+                if cv2.contourArea(c) < self.min_area:
+                    continue
+                x, y, w, h = cv2.boundingRect(c)
+                boxes.append((x, y, w, h))
         return boxes
+
+
+
 
     def update(self, frame):
         """Feed a BGR frame. Returns (total_count, active_tracks)."""

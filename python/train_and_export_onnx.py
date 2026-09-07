@@ -107,7 +107,7 @@ def train_and_export(output_path="model.onnx", num_samples=1000, num_classes=4):
                     'point_cloud_input': {1: 'num_points'},
                     'semantic_logits': {1: 'num_points'}
                 },
-                dynamo=False
+
             )
         except Exception:
             torch.onnx.export(

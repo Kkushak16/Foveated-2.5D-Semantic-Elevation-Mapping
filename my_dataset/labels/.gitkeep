@@ -1,0 +1,3 @@
+# Place YOLO-format label files here (.txt)
+# Format: <class_id> <x_center> <y_center> <width> <height> (normalized 0-1)
+# One line per object in the corresponding image.

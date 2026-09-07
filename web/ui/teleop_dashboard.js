@@ -724,7 +724,10 @@ class UnifiedTeleopEngine {
         if (this.cameraSource === 'webcam' && this.webcamActive && this.videoElem.readyState >= 2) {
             // LIVE PHYSICAL WEBCAM STREAM
             sourceElem = this.videoElem;
-            ctx.drawImage(this.videoElem, 0, 0, w, h);
+            ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(this.videoElem, -w, 0, w, h);
+      ctx.restore();
         } else {
             // SYNTHETIC BENCHMARK STREAM
             ctx.fillStyle = '#0f172a';

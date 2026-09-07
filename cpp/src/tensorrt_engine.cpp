@@ -14,25 +14,31 @@ TensorRTEngine::TensorRTEngine(PrecisionMode precision) : precision_(precision) 
 
 TensorRTEngine::~TensorRTEngine() {}
 
-bool TensorRTEngine::build_engine_from_onnx(const std::string& onnx_path, const std::string& engine_save_path) {
+  bool TensorRTEngine::build_engine_from_onnx(const std::string& onnx_path, const std::string& engine_save_path) {
     std::cout << "========================================================\n";
     std::cout << "  [TensorRT Runtime C++] Compiling ONNX -> TensorRT .engine\n";
     std::cout << "========================================================\n";
     std::cout << "  - Input ONNX       : " << onnx_path << "\n";
     std::cout << "  - Precision Mode   : " << (precision_ == PrecisionMode::INT8 ? "INT8 (Hardware Quantized)" : "FP16") << "\n";
-    std::cout << "  - Hardware Target  : NVIDIA Drive Orin / Jetson Xavier / RTX GPU\n";
-    std::cout << "  - Graph Fusion     : Enabled (Conv + LayerNorm + ReLU Fused)\n";
+    std::cout << "  - Hardware Target  : NVIDIA Orin/RTX\n";
+    std::cout << "  - Graph Fusion     : Enabled\n";
+    
+    // Simulate simulated : use INT8 path directly if requested
+    if (precision_ == PrecisionMode::INT8) {
+        std::cout << "  - Using INT8 quantization (simulated)\n";
+    }
     
     // Simulate serialized .engine binary file creation
     std::ofstream out(engine_save_path, std::ios::binary);
-    out << "TENSORRT_COMPILED_ENGINE_PLAN_BINARY_PRECISION_INT8_V8.6";
+    out << "TENSORRT_COMPILED_ENGINE_PLAN_BINARY_PRECISION_" << (precision_ == PrecisionMode::INT8 ? "INT8" : "FP16") << "_V8.6";
     out.close();
 
-    std::cout << "  - Output Saved To  : " << engine_save_path << "\n";
-    std::cout << "  [SUCCESS] TensorRT engine compiled in 3.8 seconds.\n";
+    std::cout << "  - Output Saved ..." << "\n";
+    std::cout << "  [SUCCESS] TensorRT engine compiled.
+";
     is_loaded_ = true;
     return true;
-}
+  }
 
 bool TensorRTEngine::load_engine(const std::string& engine_path) {
     std::cout << "[TensorRT Runtime] Loading engine file: " << engine_path << "...\n";

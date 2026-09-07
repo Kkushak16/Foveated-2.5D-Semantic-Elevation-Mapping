@@ -64,6 +64,58 @@ def step_web_dashboard():
     print("  - Server Bridge  : web/server/websocket_bridge.js")
     print("  - Zero-Overhead  : Decoupled telemetry streaming without vehicle ECU lag")
 
+def step_vehicle_detection():
+    """Run YOLOv5 (or fallback) vehicle detection on a sample dashboard frame."""
+    sys.path.insert(0, os.path.join(SCRIPT_DIR, "python"))
+    from vehicle_info_model import VehicleCounter, classify_vehicle_color
+    import json
+
+    # Pick a dashboard frame as test input
+    test_frame = os.path.join(SCRIPT_DIR, "dashboard_frame_001.bmp")
+    counter = VehicleCounter()
+
+    backend = "YOLOv5 Deep Detector" if counter.torch is not None else "Frame-Diff + Color-Mask Fallback"
+    print(f"[Vehicle Detection] Backend: {backend}")
+
+    try:
+        import cv2
+        if os.path.exists(test_frame):
+            frame = cv2.imread(test_frame)
+            if frame is not None:
+                counter.update(frame)
+                total, tracks = counter.update(frame)
+                # Also run _detect directly for single-image completeness
+                if not tracks:
+                    import numpy as np
+                    boxes = counter._detect(frame)
+                    tracks = []
+                    for (x, y, bw, bh) in boxes:
+                        crop = frame[max(y, 0):y + bh, max(x, 0):x + bw]
+                        color = classify_vehicle_color(crop)
+                        tracks.append({"color": color, "box": (x, y, bw, bh)})
+                print(f"  - Detected {len(tracks)} vehicle(s) in sample frame")
+                colors = [t.get('color', 'unknown') for t in tracks]
+                print(f"  - Colors: {colors}")
+
+                # Update dashboard HUD JSON
+                hud = {
+                    "vehicles_detected": len(tracks),
+                    "colors": colors,
+                    "source": "dashboard_frame_001.bmp",
+                }
+                hud_path = os.path.join(SCRIPT_DIR, "web", "ui", "vehicle_info.json")
+                with open(hud_path, "w") as f:
+                    json.dump(hud, f, indent=2)
+                print(f"  - HUD JSON updated: {hud_path}")
+            else:
+                print(f"  - [SKIP] Could not read {test_frame}")
+        else:
+            print(f"  - [SKIP] Test frame not found: {test_frame}")
+    except ImportError:
+        print("  - [SKIP] OpenCV not available — vehicle detection requires opencv-python")
+    except Exception as e:
+        print(f"  - [WARN] Vehicle detection error: {e}")
+
 def main():
     print("\n" + "*" * 75)
     print("  [SYSTEM DEMO] FOVEATED 2.5D LIDAR PIPELINE - MULTI-LANGUAGE ARCHITECTURE")
@@ -72,6 +124,7 @@ def main():
     run_step("STAGE 1A: Python Offline Machine Learning & ONNX Model Export", step_python_onnx)
     run_step("STAGE 1B: Python Camera Foveation & Optical Flow Motion Gating", step_camera_foveation)
     run_step("STAGE 1C: Python Multi-Step Recurrent Gaze RL Scanning Policy", step_recurrent_gaze_rl)
+    run_step("STAGE 1D: YOLOv5 Vehicle Detection & Counting Pipeline", step_vehicle_detection)
     run_step("STAGE 2: C++ / CUDA / TensorRT / ROS 2 Onboard Engine Processing", step_cpp_cuda_sim)
     run_step("STAGE 3: JavaScript / TypeScript WebGL Teleoperation Dashboard Bridge", step_web_dashboard)
 
@@ -82,9 +135,10 @@ def main():
     print("  2. CUDA C++ Kernels       : Reduces point-to-grid projection from 300ms (CPU) to 1.82ms (GPU).")
     print("  3. C++ TensorRT Engine    : Quantizes model to INT8, cutting inference from 50ms to 4.35ms.")
     print("  4. Dual Sensor Foveation  : Aligns Camera crops to 3 LiDAR rings + optical flow gating (~75% pixel savings).")
-    print("  5. ROS 2 rclcpp Node      : Low-latency interconnect to vehicle trajectory planners.")
-    print("  6. WebGL Teleop (JS/TS)   : Web browser monitoring without draining onboard compute.")
-    print("  7. CMake & Docker         : Zero dependency drift between dev laptop & Orin ECU.")
+    print("  5. YOLOv5 Vehicle Detect  : Deep detector finds stationary + moving vehicles; fallback to color-mask.")
+    print("  6. ROS 2 rclcpp Node      : Low-latency interconnect to vehicle trajectory planners.")
+    print("  7. WebGL Teleop (JS/TS)   : Web browser monitoring without draining onboard compute.")
+    print("  8. CMake & Docker         : Zero dependency drift between dev laptop & Orin ECU.")
     print("=" * 75 + "\n")
 
 if __name__ == "__main__":

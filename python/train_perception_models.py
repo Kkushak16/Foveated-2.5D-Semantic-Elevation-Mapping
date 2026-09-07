@@ -37,7 +37,7 @@ def main():
     args = ap.parse_args()
 
     if args.smoke:
-        tracking = {"status": "smoke-stub", "note": "pass --driving-data to train for real"}
+        tracking = {"status": "inactive", "note": "pass --driving-data to train for real"}
         vehicle = {"total_vehicles": 0, "color_histogram": {},
                    "dominant_color": "unknown", "status": "smoke-stub"}
     else:

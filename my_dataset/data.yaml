@@ -1,0 +1,36 @@
+# YOLOv5 Custom Vehicle Detection Dataset
+# =========================================
+# Place your labelled data here for custom model training.
+#
+# Structure:
+#   my_dataset/
+#     data.yaml        <- this file
+#     images/
+#       img001.jpg
+#       img002.jpg
+#       ...
+#     labels/
+#       img001.txt     <- YOLO format: <class> <x_center> <y_center> <width> <height> (normalized 0-1)
+#       img002.txt
+#       ...
+#
+# Label format (one line per object):
+#   <class_id> <x_center> <y_center> <width> <height>
+#   All coordinates are normalized to [0, 1] relative to image width/height.
+#   Example: 0 0.5 0.6 0.3 0.2   (class 0 = car, centered at 50%/60%, 30% wide, 20% tall)
+
+# Dataset root (relative to yolov5/ when training)
+path: ../my_dataset
+
+# Splits — for a quick start, use the same folder for train/val.
+# For production, split images into train/ and val/ subfolders.
+train: images
+val: images
+
+# Class names — adjust to match your labelling
+nc: 4  # number of classes
+names:
+  0: car
+  1: truck
+  2: bus
+  3: motorcycle
