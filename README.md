@@ -61,12 +61,20 @@ To achieve full narrative unity across both vision modalities, the **camera imag
 
 ```
 Lidar Mapping/
-├── CMakeLists.txt                # C++/CUDA build orchestrator
+├── 2.5D training.md              # Deep-dive: INT8 TensorRT, CUDA Streams & DeepSORT Tracker
+├── CMakeLists.txt                # C++/CUDA build orchestrator (with automatic CPU fallback)
 ├── build.sh                      # Cross-platform build script
 ├── Docker/
 │   └── Dockerfile                # NVIDIA L4T Docker container
+├── ros2_ws/                      # ROS 2 Colcon Workspace
+│   └── src/vehicle_detection_ros2/
+│       ├── CMakeLists.txt        # ament_cmake build definition
+│       ├── package.xml           # ROS 2 dependencies (rclcpp, sensor_msgs, etc.)
+│       └── src/
+│           └── foveated_vehicle_detect_node.cpp # Multi-threaded ROS 2 node
 ├── python/                       # Offline ML & ONNX Exporting
 │   ├── train_and_export_onnx.py  # PyTorch 3D model exporter (.onnx)
+│   ├── vehicle_info_model.py     # Vehicle telemetry & bounding box data model
 │   └── validate_onnx.py          # ONNX Runtime & mIoU validator
 ├── cpp/                          # Native C++ Real-time Core
 │   ├── include/                  # Ring Buffer, LiDAR Driver, TensorRT, ROS 2 headers
@@ -74,6 +82,9 @@ Lidar Mapping/
 ├── cuda/                         # CUDA C++ Acceleration
 │   ├── include/grid_projection.cuh
 │   └── src/grid_projection.cu    # Parallel 3D-to-2.5D projection kernels (<2ms)
+├── my_dataset/                   # Custom dataset directory & data.yaml
+├── train_yolo.py                 # Ultralytics/YOLOv5 vehicle detector training
+├── demo_vehicle_detect.py        # Single-frame vehicle detection & demo inference
 ├── web/                          # Teleoperation Dashboard (JS/TS WebGL)
 │   ├── server/websocket_bridge.js # Node.js WebSocket telemetry bridge
 │   └── ui/                       # HTML5/WebGL HUD interface
@@ -383,6 +394,67 @@ Full technical documentation and dual-mode hackathon demo playbook:
 
 ---
 
+## 🛰️ Phase 7 — Real-Time ROS 2 Node & High-Throughput TensorRT Inference
+
+Integrates the native C++ ring-buffer core, parallel CUDA projection, and YOLOv5 vehicle detector into a production-grade ROS 2 pipeline with $< 9\text{ ms}$ latency.
+
+### 1 — Standalone C++ & CUDA Core Build
+
+CMake automatically inspects the environment for `nvcc`. If an NVIDIA GPU toolchain is found, it compiles the CUDA kernels; otherwise, it activates the CPU fallback path:
+
+```bash
+# Configure and build native C++ core
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+# Run automated tests
+ctest --test-dir build --output-on-failure
+```
+
+### 2 — ROS 2 Package Build (`colcon`)
+
+The package [`ros2_ws/src/vehicle_detection_ros2`](./ros2_ws/src/vehicle_detection_ros2/) builds as a standard `ament_cmake` package:
+
+```bash
+cd ros2_ws
+colcon build --packages-select vehicle_detection_ros2 --symlink-install
+source install/setup.bash
+
+# Run the multi-threaded ROS 2 node
+ros2 run vehicle_detection_ros2 vehicle_detection_node
+```
+
+**Subscribed & Published Topics:**
+
+| Topic | Type | Description |
+|---|---|---|
+| `/lidar/points_raw` | `sensor_msgs/msg/PointCloud2` | Ingests 32/64-beam LiDAR scans |
+| `/camera/image_raw` | `sensor_msgs/msg/Image` | Front-facing automotive camera feed |
+| `/planning/foveated_grid` | `nav_msgs/msg/OccupancyGrid` | 2.5D multi-level foveated elevation grid |
+| `/camera/tracked_objects` | `vision_msgs/msg/Detection2DArray` | Tracked vehicles with persistent track IDs |
+
+### 3 — Vehicle Detector Training & Single-Frame Demo
+
+```bash
+# Train vehicle detector on custom dataset
+python train_yolo.py --data my_dataset/data.yaml --epochs 50 --img 640
+
+# Run inference on sample image
+python demo_vehicle_detect.py --image recorded_demo/dashboard_frame_001.bmp
+```
+
+### 4 — High-Throughput Optimization & Tracking Guide
+
+For detailed guides on:
+* **TensorRT INT8 Quantization:** C++ `IInt8EntropyCalibrator2` implementation and dynamic optimization profiles.
+* **CUDA Asynchronous Streams:** Non-blocking kernel execution on pinned memory buffers.
+* **DeepSORT / ByteTrack Integration:** Python tracking node for vehicle trajectory association.
+* **Nsight Systems Profiling:** Kernel-level latency diagnostics.
+
+👉 See the complete guide: [**`2.5D training.md`**](./2.5D%20training.md)
+
+---
+
 ## 🗺️ Roadmap
 
 | Phase | Scope | Status |
@@ -393,6 +465,7 @@ Full technical documentation and dual-mode hackathon demo playbook:
 | **Phase 4** | 3-Ring HUD visualization dashboard & frame playback | ✅ Done |
 | **Phase 5** | Automated benchmarking suite vs uniform baseline & robustness tests | ✅ Done |
 | **Phase 6** | Architecture documentation, hackathon script & pre-rendered demo archive | ✅ Done |
+| **Phase 7** | Multi-threaded ROS 2 node, TensorRT INT8 optimization & DeepSORT tracking | ✅ Done |
 
 ---
 
