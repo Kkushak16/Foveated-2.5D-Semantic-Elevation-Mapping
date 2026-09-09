@@ -127,7 +127,7 @@ class RealtimeMotionAnalyzer {
         }
 
         const roiStartRow = Math.floor(this.rows * roiMinYRatio);
-        const roiEndRow   = Math.floor(this.rows * roiMaxYRatio);
+        const roiEndRow = Math.floor(this.rows * roiMaxYRatio);
 
         // Temporal diff with exposure compensation. A webcam's auto-exposure changes
         // most pixels at once and is not object motion.
@@ -214,7 +214,7 @@ class RealtimeMotionAnalyzer {
             // Stable TRACKING: coast on the last box when the current raw frame
             // has no fresh region (object paused for a frame but not yet released).
             if (rawMotion && largestRegion) {
-                const scaleX = fullWidth  / this.cols;
+                const scaleX = fullWidth / this.cols;
                 const scaleY = fullHeight / this.rows;
                 const rawBox = {
                     x: largestRegion.minCol * scaleX,
@@ -321,7 +321,7 @@ class SemanticVision {
         };
         this.ws.onmessage = (ev) => this._onMessage(ev);
         this.ws.onclose = () => this._drop();
-        this.ws.onerror = () => { try { if (this.ws) this.ws.close(); } catch (e) {} };
+        this.ws.onerror = () => { try { if (this.ws) this.ws.close(); } catch (e) { } };
     }
 
     _drop() {
@@ -340,7 +340,7 @@ class SemanticVision {
     }
 
     _sendText(obj) {
-        try { if (this.ws) this.ws.send(JSON.stringify(obj)); } catch (e) {}
+        try { if (this.ws) this.ws.send(JSON.stringify(obj)); } catch (e) { }
     }
 
     sendFrame(data, w, h) {
@@ -387,7 +387,7 @@ class SemanticVision {
                 if (msg.backend) this.backend = msg.backend;
                 this._pending = false;
             }
-        } catch (e) {}
+        } catch (e) { }
     }
 
     analyzeLocal(data, w, h) {
@@ -1206,9 +1206,9 @@ class UnifiedTeleopEngine {
             // LIVE PHYSICAL WEBCAM STREAM
             sourceElem = this.videoElem;
             ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(this.videoElem, -w, 0, w, h);
-      ctx.restore();
+            ctx.scale(-1, 1);
+            ctx.drawImage(this.videoElem, -w, 0, w, h);
+            ctx.restore();
         } else {
             // SYNTHETIC BENCHMARK STREAM
             ctx.fillStyle = '#0f172a';
@@ -1234,7 +1234,7 @@ class UnifiedTeleopEngine {
         // A generic webcam has no reliable horizon or vehicle hood, so do not label
         // its geometric compute exclusions as semantic sky/hood classifications.
         const isWebcam = this.cameraSource === 'webcam' && this.webcamActive;
-        const topLabel    = isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)'    : '🚫 SKY REGION MASKED (35% Pixel Savings)';
+        const topLabel = isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)' : '🚫 SKY REGION MASKED (35% Pixel Savings)';
         const bottomLabel = isWebcam ? '🚫 BOTTOM EXCLUSION ZONE (15% Pixel Savings)' : '🚫 VEHICLE HOOD MASKED (15% Pixel Savings)';
 
         ctx.fillStyle = 'rgba(2, 6, 23, 0.80)';
@@ -1270,8 +1270,8 @@ class UnifiedTeleopEngine {
         // Range band presentation: color + label per master-file 3-ring design.
         const RANGE_META = {
             near: { color: '#38bdf8', tag: 'NEAR 0–10m • 1.0x', dist: '0–10m' },
-            mid:  { color: '#c084fc', tag: 'MID 10–30m • 0.5x', dist: '10–30m' },
-            far:  { color: '#fb923c', tag: 'FAR 30–100m • 0.25x', dist: '30–100m' },
+            mid: { color: '#c084fc', tag: 'MID 10–30m • 0.5x', dist: '10–30m' },
+            far: { color: '#fb923c', tag: 'FAR 30–100m • 0.25x', dist: '30–100m' },
         };
         const bandMeta = RANGE_META[analysis.rangeBand] || null;
 
@@ -1324,7 +1324,7 @@ class UnifiedTeleopEngine {
         }
 
         const realCacheHitPct = Math.max(0, 100.0 - (analysis.motionRatio * 100)).toFixed(0);
-        const roiTrackingPct  = analysis.motionDetected ? Math.min(65, 50 + Math.round(motionFactor * 15)) : 50;
+        const roiTrackingPct = analysis.motionDetected ? Math.min(65, 50 + Math.round(motionFactor * 15)) : 50;
 
         if (analysis.motionDetected) {
             const rangeTxt = bandMeta ? ` • ${bandMeta.tag}` : '';
@@ -1678,13 +1678,13 @@ function initHeroPreviewCanvas() {
     const ctx = canvas.getContext('2d');
 
     let angle = 0;
-    
+
     function resizeHeroCanvas() {
         const rect = canvas.parentElement.getBoundingClientRect();
         canvas.width = rect.width * (window.devicePixelRatio || 1);
         canvas.height = rect.height * (window.devicePixelRatio || 1);
     }
-    
+
     window.addEventListener('resize', resizeHeroCanvas);
     resizeHeroCanvas();
 
@@ -1710,7 +1710,7 @@ function initHeroPreviewCanvas() {
         // Draw 3 Concentric Ring Grids
         const rings = [50, 110, 170];
         const ringColors = ['rgba(56, 189, 248, 0.25)', 'rgba(192, 132, 252, 0.2)', 'rgba(251, 146, 60, 0.15)'];
-        
+
         rings.forEach((r, idx) => {
             ctx.beginPath();
             ctx.ellipse(centerX, centerY, r * 1.6, r * 0.7, 0, 0, Math.PI * 2);
@@ -1742,7 +1742,7 @@ function initHeroPreviewCanvas() {
             const rotTheta = pt.theta + angle;
             const x3d = pt.r * Math.cos(rotTheta);
             const y3d = pt.r * Math.sin(rotTheta);
-            
+
             // Isometric projection
             const projX = centerX + (x3d - y3d) * 0.8;
             const projY = centerY + (x3d + y3d) * 0.35 - pt.z;
