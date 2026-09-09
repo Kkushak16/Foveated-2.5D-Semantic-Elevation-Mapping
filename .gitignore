@@ -31,3 +31,5 @@ build/
 *.onnx
 *.engine
 *.plan
+*.pt
+*.log

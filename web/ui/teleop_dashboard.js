@@ -277,6 +277,299 @@ class RealtimeMotionAnalyzer {
     }
 }
 
+class SemanticVision {
+    constructor(opts) {
+        this.wsUrl = (opts && opts.wsUrl) || 'ws://127.0.0.1:8090';
+        this.ws = null;
+        this.status = 'idle';          // idle | connecting | online | offline
+        this.backend = null;           // yolov8n | yolov5s | cv-cascade | browser-cascade
+        this.inferMs = 0;
+        this.fps = 0;
+        this.lastObjects = [];         // detections from the Python server (send-frame space)
+        this._pending = false;
+        this._pendingUntil = 0;
+        this._lastSentAt = 0;
+        this._sendIntervalMs = 140;    // ~7 FPS upstream (keeps frames small for YOLO)
+        this._reconnectMs = 4000;
+        this._reconnectTimer = null;
+        // Local (offline) cascade state: browser-only semantic fallback so a
+        // STILL person/photo is still tracked even with no Python server.
+        this.localObjects = [];
+        this._prevLocalDets = [];
+        this.localNextId = 1;
+    }
+
+    connect() {
+        if (this.status === 'online' || this.status === 'connecting') return;
+        if (typeof WebSocket === 'undefined') {
+            this.status = 'offline';
+            this.scheduleReconnect();
+            return;
+        }
+        this.status = 'connecting';
+        try {
+            this.ws = new WebSocket(this.wsUrl);
+        } catch (err) {
+            this.status = 'offline';
+            this.scheduleReconnect();
+            return;
+        }
+        this.ws.binaryType = 'arraybuffer';
+        this.ws.onopen = () => {
+            this.status = 'online';
+            this._sendText({ cmd: 'ping' });
+        };
+        this.ws.onmessage = (ev) => this._onMessage(ev);
+        this.ws.onclose = () => this._drop();
+        this.ws.onerror = () => { try { if (this.ws) this.ws.close(); } catch (e) {} };
+    }
+
+    _drop() {
+        this.ws = null;
+        this.status = 'offline';
+        this._pending = false;
+        this.scheduleReconnect();
+    }
+
+    scheduleReconnect() {
+        if (this._reconnectTimer || this.status === 'connecting') return;
+        this._reconnectTimer = setTimeout(() => {
+            this._reconnectTimer = null;
+            if (this.status !== 'online') this.connect();
+        }, this._reconnectMs);
+    }
+
+    _sendText(obj) {
+        try { if (this.ws) this.ws.send(JSON.stringify(obj)); } catch (e) {}
+    }
+
+    sendFrame(data, w, h) {
+        const now = performance.now();
+        if (this.status !== 'online' || !this.ws) return false;
+        if (now < this._pendingUntil) return false;
+        if (now - this._lastSentAt < this._sendIntervalMs) return false;
+        this._lastSentAt = now;
+        // header: <u32 BE width><u32 BE height> + RGBA bytes (matches Python)
+        const payload = new Uint8Array(8 + w * h * 4);
+        const dv = new DataView(payload.buffer);
+        dv.setUint32(0, w);
+        dv.setUint32(4, h);
+        payload.set(data instanceof Uint8Array ? data : new Uint8Array(data), 8);
+        this._pending = true;
+        this._pendingUntil = now + 800;
+        try {
+            this.ws.send(payload);
+            return true;
+        } catch (e) {
+            this._pending = false;
+            return false;
+        }
+    }
+
+    _onMessage(ev) {
+        if (typeof ev.data !== 'string') return;
+        try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'detections') {
+                this.lastObjects = (msg.objects || []).map(o => ({
+                    id: o.id,
+                    label: o.label,
+                    conf: o.conf,
+                    box: o.box,
+                    parts: o.parts || [],
+                    range_band: o.range_band || 'mid',
+                }));
+                if (msg.backend) this.backend = msg.backend;
+                if (msg.infer_ms !== undefined) this.inferMs = msg.infer_ms;
+                if (msg.fps) this.fps = msg.fps;
+                this._pending = false;
+            } else if (msg.type === 'pong') {
+                if (msg.backend) this.backend = msg.backend;
+                this._pending = false;
+            }
+        } catch (e) {}
+    }
+
+    analyzeLocal(data, w, h) {
+        // Per-frame semantic cascade — recognises people & vehicles from a
+        // SINGLE STILL frame (temporal diff is never required), so a photo
+        // held in front of the webcam IS detected.
+        const skin = new Uint8Array(w * h);
+        const luma = new Uint8Array(w * h);
+        for (let i = 0; i < w * h; i++) {
+            const idx = i * 4;
+            const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+            luma[i] = (r * 299 + g * 587 + b * 114) / 1000;
+            if (r > 95 && g > 40 && b > 20 && (r - g) > 15 && r > b) {
+                skin[i] = 1;   // skin-tone pixel → person cue
+            }
+        }
+
+        const blobBoxes = (mask, minArea, loY, hiY) => {
+            const vis = new Uint8Array(w * h);
+            const out = [];
+            const r0 = Math.max(0, Math.floor((loY || 0) * h));
+            const r1 = Math.min(h - 1, Math.floor(((hiY || 1) * h)));
+            for (let r = r0 + 1; r < r1 - 1; r++) {
+                for (let c = 1; c < w - 1; c++) {
+                    const i = r * w + c;
+                    if (!mask[i] || vis[i]) continue;
+                    const q = [i];
+                    vis[i] = 1;
+                    let count = 0, minC = c, maxC = c, minR = r, maxR = r;
+                    for (let head = 0; head < q.length; head++) {
+                        const p = q[head];
+                        const pr = Math.floor(p / w), pc = p - pr * w;
+                        count++;
+                        if (pc < minC) minC = pc;
+                        if (pc > maxC) maxC = pc;
+                        if (pr < minR) minR = pr;
+                        if (pr > maxR) maxR = pr;
+                        for (const n of [p - 1, p + 1, p - w, p + w]) {
+                            if (n >= 0 && n < w * h && mask[n] && !vis[n]) {
+                                vis[n] = 1;
+                                q.push(n);
+                            }
+                        }
+                    }
+                    if (count >= minArea) {
+                        out.push({ x: minC, y: minR, w: maxC - minC + 1, h: maxR - minR + 1 });
+                    }
+                }
+            }
+            return out;
+        };
+
+        // Persons: skin blobs expanded downward to approximate a full body.
+        // Apply stricter heuristics to reduce false positives: require a larger
+        // minimum area and ensure the detection lies sufficiently low in the
+        // image (people are normally on the ground plane).
+        const rawPersons = [];
+        const MIN_PERSON_AREA = 120; // increase from 60 to filter tiny blobs
+        for (const b of blobBoxes(skin, MIN_PERSON_AREA, 0, 1)) {
+            // Discard detections that are too high in the frame (likely not a person).
+            const verticalPos = b.y / Math.max(1, h);
+            if (verticalPos < 0.15) continue;
+            rawPersons.push({
+                label: 'person', conf: 0.6,
+                box: [b.x, b.y, b.w, Math.min(h - b.y, b.h * 2 + 4)],
+                parts: [],
+                range_band: this._rangeLocal(b, w, h),
+            });
+        }
+        // One body == one box: the face and hands of ONE seated person are
+        // SEPARATE skin blobs; union overlapping/near person boxes so each
+        // person counts exactly once (no phantom extra people).
+        let persons = rawPersons.slice();
+        let personsMerged = true;
+        while (personsMerged) {
+            personsMerged = false;
+            for (let i = 0; i < persons.length && !personsMerged; i++) {
+                for (let j = i + 1; j < persons.length; j++) {
+                    const a = persons[i].box, b = persons[j].box;
+                    const acx = a[0] + a[2] / 2, acy = a[1] + a[3] / 2;
+                    const bcx = b[0] + b[2] / 2, bcy = b[1] + b[3] / 2;
+                    const nearX = Math.abs(acx - bcx) < (a[2] + b[2]) * 0.6;
+                    const nearY = Math.abs(acy - bcy) < (a[3] + b[3]) * 0.6;
+                    if (this._iou(a, b) > 0.05 || (nearX && nearY)) {
+                        const x1 = Math.min(a[0], b[0]), y1 = Math.min(a[1], b[1]);
+                        const x2 = Math.max(a[0] + a[2], b[0] + b[2]);
+                        const y2 = Math.max(a[1] + a[3], b[1] + b[3]);
+                        persons[i] = {
+                            ...persons[i],
+                            box: [x1, y1, x2 - x1, y2 - y1],
+                            conf: Math.max(persons[i].conf, persons[j].conf),
+                        };
+                        persons.splice(j, 1);
+                        personsMerged = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // Retain all detected persons after merging; duplicate detections are already merged above.
+
+
+        // Vehicles: still dark rectangles (car-like aspect) in lower 2/3.
+        const dark = new Uint8Array(w * h);
+        const darkTop = Math.floor(h * 0.3), darkBot = Math.floor(h * 0.92);
+        for (let r = darkTop; r < darkBot; r++) {
+            const base = r * w;
+            for (let c = 0; c < w; c++) {
+                if (luma[base + c] < 100) dark[base + c] = 1;
+            }
+        }
+        const vehicles = [];
+        for (const b of blobBoxes(dark, Math.max(30, Math.floor(w * h * 0.004)), 0.3, 0.92)) {
+            const aspect = b.w / Math.max(1, b.h);
+            if (aspect < 1.05 || aspect > 5.0 || b.h < h * 0.06) continue;
+            vehicles.push({
+                label: 'vehicle', conf: 0.5,
+                box: [b.x, b.y, b.w, b.h],
+                parts: [],
+                range_band: this._rangeLocal(b, w, h),
+            });
+        }
+
+        // NMS (persons first so they win ties).
+        let dets = persons.concat(vehicles);
+        const kept = [];
+        for (const d of dets) {
+            if (kept.some(k => this._iou(k.box, d.box) > 0.38)) continue;
+            kept.push(d);
+        }
+        dets = kept;
+
+        // Stable IDs via IoU match against the previous cascade pass.
+        const prev = this._prevLocalDets || [];
+        const matched = new Set();
+        const out = [];
+        for (const p of prev) {
+            let best = null, bestScore = 0.08;
+            for (let i = 0; i < dets.length; i++) {
+                if (matched.has(i)) continue;
+                const s = this._iou(p.box, dets[i].box);
+                if (s > bestScore) { best = i; bestScore = s; }
+            }
+            if (best !== null) {
+                matched.add(best);
+                const d = dets[best];
+                d.id = p.id;
+                out.push(d);
+            }
+        }
+        this.localNextId = this.localNextId || 1;
+        for (let i = 0; i < dets.length; i++) {
+            if (matched.has(i)) continue;
+            dets[i].id = this.localNextId++;
+            out.push(dets[i]);
+        }
+        this._prevLocalDets = out.map(d => ({ id: d.id, box: d.box.slice() }));
+        this.localObjects = out;
+        return out;
+    }
+
+    _rangeLocal(b, w, h) {
+        const bottom = (b.y + b.h) / Math.max(1, h);
+        const rh = b.h / Math.max(1, h);
+        const score = Math.min(1, Math.max(0, (bottom - 0.35) / 0.5)) * 0.55
+            + Math.min(1, rh / 0.45) * 0.45;
+        if (score > 0.62) return 'near';
+        if (score > 0.34) return 'mid';
+        return 'far';
+    }
+
+    _iou(a, b) {
+        const ax1 = a[0], ay1 = a[1], aw = a[2], ah = a[3];
+        const bx1 = b[0], by1 = b[1], bw = b[2], bh = b[3];
+        const iw = Math.max(0, Math.min(ax1 + aw, bx1 + bw) - Math.max(ax1, bx1));
+        const ih = Math.max(0, Math.min(ay1 + ah, by1 + bh) - Math.max(ay1, by1));
+        const inter = iw * ih;
+        const union = aw * ah + bw * bh - inter;
+        return union > 0 ? inter / union : 0;
+    }
+
+}
 class UnifiedTeleopEngine {
     constructor() {
         this.bevCanvas = document.getElementById('teleop-canvas');
@@ -299,6 +592,18 @@ class UnifiedTeleopEngine {
 
         this.webcamActive = false;
         this.motionAnalyzer = new RealtimeMotionAnalyzer(80, 45);
+
+        // --- Semantic (YOLO) shape recognition state ---
+        this.semanticVision = new SemanticVision();
+        this.semanticObjects = [];      // display-space (mirrored) detections
+        this.semanticVisionActive = false;
+        this.lastSemanticBackend = null;
+        this._visionTick = 0;
+        this.semOffscreen = null;
+        this.semOffscreenCtx = null;
+        this._lastYoloText = '';
+        this._lastPersons = -1;
+        this._lastVehicles = -1;
 
         // --- Cross-modal BEV projection state ---
         this.sweepAngle = 0;        // rotating LiDAR sweep beam (always spins)
@@ -340,6 +645,7 @@ class UnifiedTeleopEngine {
             this.videoElem.srcObject = stream;
             await this.videoElem.play();
             this.webcamActive = true;
+            this.initSemanticVision();
             console.log('[WEBCAM] Live physical webcam stream initialized.');
         } catch (err) {
             console.error('[WEBCAM ERROR]', err);
@@ -357,6 +663,9 @@ class UnifiedTeleopEngine {
             this.videoElem.srcObject = null;
         }
         this.webcamActive = false;
+        this.semanticObjects = [];
+        this.semanticVisionActive = false;
+        this.cameraTargets = [];
     }
 
     setCameraSource(source) {
@@ -482,6 +791,11 @@ class UnifiedTeleopEngine {
     }
 
     render() {
+        // Semantic (YOLO) shape inspection runs BEFORE the BEV is drawn so the
+        // Bird's-Eye view can fuse camera detections even in BEV-only mode.
+        if (this.cameraSource === 'webcam' && this.webcamActive) {
+            this.runSemanticVision();
+        }
         this.drawLidarBEV();
         this.drawCameraFoveation();
         this._updatePipelineTelemetry();
@@ -545,6 +859,167 @@ class UnifiedTeleopEngine {
         if (statMemory) statMemory.innerText = `-${savedPct}%`;
         const statMemSub = statMemory ? statMemory.nextElementSibling : null;
         if (statMemSub) statMemSub.innerText = `${soaMb} MB (O(1) SoA)`;
+    }
+
+    /**
+     * Semantic vision pipeline for the LIVE webcam: grabs a small frame, sends
+     * it to the Python YOLO server (or runs the built-in cascade fallback),
+     * maps results into mirrored display coordinates and keeps the BEV fusion
+     * targets in sync. Detection is per-frame → a STILL photo/video held in
+     * front of the camera is still recognised (no temporal delta required).
+     */
+    runSemanticVision() {
+        const sv = this.semanticVision;
+        const video = this.videoElem;
+        if (!video || video.readyState < 2) {
+            this.semanticVisionActive = false;
+            return;
+        }
+        const w = this.camCanvas.width;
+        const h = this.camCanvas.height;
+        if (w < 16 || h < 16) return;
+        this._visionTick = (this._visionTick || 0) + 1;
+        const throttled = (this._visionTick % 2 === 1); // analyse ~every 2nd frame
+
+        if (!this.semOffscreen) {
+            this.semOffscreen = document.createElement('canvas');
+            this.semOffscreenCtx = this.semOffscreen.getContext('2d', { willReadFrequently: true });
+        }
+        const sendW = 480;
+        const sendH = Math.max(120, Math.round(h * (sendW / Math.max(1, w))));
+        this.semOffscreen.width = sendW;
+        this.semOffscreen.height = sendH;
+        this.semOffscreenCtx.drawImage(video, 0, 0, sendW, sendH);
+        let imgData = null;
+        try {
+            imgData = this.semOffscreenCtx.getImageData(0, 0, sendW, sendH);
+        } catch (e) {
+            this.semanticVisionActive = false;
+            return;
+        }
+        if (!imgData || !imgData.data || imgData.data.length < sendW * sendH * 4) {
+            this.semanticVisionActive = false;
+            return;
+        }
+        if (!throttled) {
+            this._updateYoloHud(sv.lastObjects.length ? (sv.backend || 'yolo') : sv.backend || 'browser-cascade', sv, w, h);
+            return;
+        }
+
+        let objects = [];
+        let backend = null;
+        if (sv.status === 'online') {
+            sv.sendFrame(imgData.data, sendW, sendH);
+            objects = sv.lastObjects;
+            backend = sv.backend || 'yolo';
+        } else {
+            objects = sv.analyzeLocal(imgData.data, sendW, sendH);
+            backend = 'browser-cascade';
+        }
+
+        // Map send-frame (unmirrored) detections to the MIRRORED display canvas.
+        const kx = w / sendW, ky = h / sendH;
+        const display = [];
+        for (const o of objects) {
+            const sb = [o.box[0], o.box[1], o.box[2], o.box[3]];
+            if (sb[2] <= 0 || sb[3] <= 0) continue;
+            display.push({
+                id: o.id,
+                label: o.label,
+                conf: o.conf,
+                parts: o.parts || [],
+                range_band: o.range_band || 'mid',
+                box: [w - (sb[0] + sb[2]) * kx, sb[1] * ky, sb[2] * kx, sb[3] * ky],
+                _sendBox: sb,
+            });
+        }
+        this.semanticObjects = display;
+        this.semanticVisionActive = true;
+        this.lastSemanticBackend = backend;
+
+        // Keep the BEV fusion targets in sync (one target per VISIBLE object).
+        this.cameraTargets = display.map(o => ({
+            bearing01: Math.min(1, Math.max(0, (o.box[0] + o.box[2] / 2) / Math.max(1, w))),
+            rangeBand: o.range_band || 'mid',
+            color: this.semanticLabelColor(o.label),
+            label: o.label,
+            conf: o.conf,
+        }));
+        this.lastRangeBand = display.length ? display[0].range_band : null;
+
+        this._updateYoloHud(backend, sv, w, h);
+    }
+
+    initSemanticVision() {
+        const sv = this.semanticVision;
+        const tryConnect = () => {
+            try {
+                fetch('yolo-status.json', { cache: 'no-store' })
+                    .then(r => { if (!r.ok) throw new Error('no-status'); return r.json(); })
+                    .then(st => {
+                        if (st && typeof st.endpoint === 'string' && st.endpoint.length) {
+                            sv.wsUrl = st.endpoint;
+                        }
+                        sv.connect();
+                    })
+                    .catch(() => {
+                        sv.wsUrl = 'ws://127.0.0.1:8090';
+                        sv.connect();
+                    });
+            } catch (err) {
+                sv.wsUrl = 'ws://127.0.0.1:8090';
+                sv.connect();
+            }
+        };
+        tryConnect();
+    }
+
+    semanticLabelColor(label) {
+        switch (label) {
+            case 'person': return '#4ade80';
+            case 'car': return '#38bdf8';
+            case 'truck': return '#c084fc';
+            case 'bus': return '#fb923c';
+            case 'motorcycle': return '#a855f7';
+            case 'bicycle': return '#22c55e';
+            default: return '#94a3b8';
+        }
+    }
+
+    _updateYoloHud(backend, sv, w, h) {
+        const el = document.getElementById('hud-yolo');
+        const count = this.semanticObjects.length;
+        if (el) {
+            let txt;
+            if (backend === 'browser-cascade') {
+                txt = `🧠 Vision: ${count} obj • browser fallback (YOLO offline)`;
+            } else {
+                txt = `🧠 YOLO: ${backend || '…'} • ${count} obj • ${Math.round(sv.inferMs || 0)}ms`;
+            }
+            if (txt !== this._lastYoloText) {
+                this._lastYoloText = txt;
+                el.innerText = txt;
+            }
+        }
+        const persons = this.semanticObjects.filter(o => o.label === 'person').length;
+        const vehicles = this.semanticObjects.length - persons;
+        const svi = document.getElementById('stat-vehicle-info');
+        if (svi && (persons !== this._lastPersons || vehicles !== this._lastVehicles)) {
+            this._lastPersons = persons;
+            this._lastVehicles = vehicles;
+            svi.innerText = `${persons} person${persons === 1 ? '' : 's'} • ${vehicles} vehicle${vehicles === 1 ? '' : 's'}`;
+        }
+        const rangeEl = document.getElementById('hud-range');
+        if (rangeEl && this.semanticVisionActive) {
+            const s = (persons || vehicles)
+                ? `👥 ${persons} PERSON${persons === 1 ? '' : 'S'} • 🚗 ${vehicles} VEHICLE${vehicles === 1 ? '' : 'S'} • SHAPE-OK`
+                : '🎯 NO SEMANTIC TARGET IN VIEW';
+            if (s !== this._lastRangeStr) {
+                this._lastRangeStr = s;
+                rangeEl.innerText = s;
+                rangeEl.style.color = (persons || vehicles) ? '#4ade80' : '';
+            }
+        }
     }
 
     drawLidarBEV() {
@@ -669,14 +1144,20 @@ class UnifiedTeleopEngine {
             const bearing = (t.bearing01 - 0.5) * Math.PI; // -90°..+90° across FOV
             const ox = cx + Math.sin(bearing) * dist * scale * 2;
             const oy = cy - Math.cos(bearing) * dist * scale * 2;
-            ctx.fillStyle = RANGE_COLOR[t.rangeBand] || '#f43f5e';
+            // Semantic (YOLO) targets carry a label → draw them in their
+            // class colour; motion-only targets keep the ring colour.
+            const tColor = t.label ? this.semanticLabelColor(t.label) : (RANGE_COLOR[t.rangeBand] || '#f43f5e');
+            ctx.fillStyle = tColor;
             ctx.fillRect(ox - 4, oy - 4, 8, 8);
-            ctx.strokeStyle = '#f43f5e';
+            ctx.strokeStyle = t.label === 'person' ? '#4ade80' : '#f43f5e';
             ctx.lineWidth = 2;
             ctx.strokeRect(ox - 6, oy - 6, 12, 12);
-            ctx.fillStyle = RANGE_COLOR[t.rangeBand] || '#f43f5e';
+            ctx.fillStyle = tColor;
             ctx.font = 'bold 10px JetBrains Mono, monospace';
-            ctx.fillText(t.rangeBand ? t.rangeBand.toUpperCase() : '??', ox + 9, oy + 4);
+            const tag = t.label
+                ? (t.label === 'person' ? 'P' : (t.label === 'vehicle' ? 'V' : t.label.slice(0, 3).toUpperCase()))
+                : (t.rangeBand ? t.rangeBand.toUpperCase() : '??');
+            ctx.fillText(tag, ox + 9, oy + 4);
         }
 
         // Demo obstacles in circular orbit mode (kept alongside camera tracks)
@@ -797,18 +1278,23 @@ class UnifiedTeleopEngine {
         // Project the tracked car into the BEV (bearing from box center-x).
         // Fusion note (master file): LiDAR 0.7 / image 0.3 baseline weights —
         // camera gives bearing+range band, LiDAR owns exact geometry.
-        if (analysis.motionDetected && analysis.box && boxOpacityPending(analysis)) {
-            const b = analysis.box;
-            this.cameraTargets = [{
-                bearing01: Math.min(1, Math.max(0, (b.x + b.w / 2) / Math.max(1, w))),
-                rangeBand: analysis.rangeBand || 'mid',
-                color: bandMeta ? bandMeta.color : '#c084fc',
-                conf: analysis.trackConfidence ?? 0,
-            }];
-            this.lastRangeBand = analysis.rangeBand;
-        } else if (!analysis.motionDetected) {
-            this.cameraTargets = [];
-            this.lastRangeBand = null;
+        // Project moving blobs into the BEV ONLY as a motion fallback — when
+        // the semantic (YOLO) path is live the per-object labels are used
+        // instead (a moving person never reads as an "oncoming car").
+        if (!this.semanticVisionActive) {
+            if (analysis.motionDetected && analysis.box && boxOpacityPending(analysis)) {
+                const b = analysis.box;
+                this.cameraTargets = [{
+                    bearing01: Math.min(1, Math.max(0, (b.x + b.w / 2) / Math.max(1, w))),
+                    rangeBand: analysis.rangeBand || 'mid',
+                    color: bandMeta ? bandMeta.color : '#c084fc',
+                    conf: analysis.trackConfidence ?? 0,
+                }];
+                this.lastRangeBand = analysis.rangeBand;
+            } else if (!analysis.motionDetected) {
+                this.cameraTargets = [];
+                this.lastRangeBand = null;
+            }
         }
 
         function boxOpacityPending(a) { return (a.boxOpacity ?? (a.motionDetected ? 1 : 0)) > 0; }
@@ -854,8 +1340,9 @@ class UnifiedTeleopEngine {
         }
 
         // HUD range pill: explicit NEAR / MID / FAR readout for the tracked car.
+        // (Skipped while the semantic vision path owns the pill.)
         const hudRange = document.getElementById('hud-range');
-        if (hudRange) {
+        if (hudRange && !this.semanticVisionActive) {
             const rangeStr = analysis.motionDetected && bandMeta
                 ? `🚗 CAR: ${analysis.rangeBand.toUpperCase()} (${bandMeta.dist}) • conf ${(analysis.trackConfidence ?? 0).toFixed(2)} • LiDAR 0.7 / IMG 0.3`
                 : '🚗 CAR: NO TARGET IN ROI';
@@ -866,43 +1353,111 @@ class UnifiedTeleopEngine {
             }
         }
 
-        // Tracked-car box in its RANGE color — answers "which ring is the car in"
-        // at a glance. Label carries range + temporal confidence (master file).
-        const boxOpacity = analysis.boxOpacity ?? (analysis.motionDetected ? 1 : 0);
-        if (boxOpacity > 0 && analysis.box) {
-            const b = analysis.box;
-            const ringColor = bandMeta ? bandMeta.color : '#f43f5e';
-            const confTxt = (analysis.trackConfidence ?? 0).toFixed(2);
-            const rangeTxt = analysis.rangeBand ? analysis.rangeBand.toUpperCase() : '…';
-            const label = `🚗 CAR • ${rangeTxt} #${analysis.trackId ?? 0} • conf ${confTxt}`;
-            ctx.save();
-            ctx.globalAlpha = boxOpacity;
-            ctx.shadowColor = ringColor;
-            ctx.shadowBlur = 12;
-            ctx.strokeStyle = ringColor;
-            ctx.lineWidth = 2.5;
-            ctx.strokeRect(b.x, b.y, b.w, b.h);
-            ctx.shadowBlur = 0;
-            const labelY = Math.max(0, b.y - 22);
-            ctx.fillStyle = ringColor;
-            const labelW = Math.max(230, label.length * 7.2);
-            ctx.fillRect(b.x, labelY, labelW, 22);
-            ctx.fillStyle = '#040405';
-            ctx.font = 'bold 11px monospace';
-            ctx.fillText(label, b.x + 4, labelY + 15);
-            ctx.restore();
-        } else {
-            // SCENE CLEAR BADGE
-            ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
+        // ── Semantic (YOLO) overlay: a labelled box for EVERY person/vehicle,
+        //    plus wheel/headlight markers found by pixel-shape analysis ──
+        if (this.semanticVisionActive && this.semanticObjects.length) {
+            const persons = this.semanticObjects.filter(o => o.label === 'person');
+            const vehicles = this.semanticObjects.length - persons;
+            for (const o of this.semanticObjects) {
+                const b = o.box;
+                const color = this.semanticLabelColor(o.label);
+                const icon = o.label === 'person' ? '🚶' : '🚗';
+                const label = `${icon} ${o.label.toUpperCase()} #${o.id} • ${(o.conf || 0).toFixed(2)} • ${(o.range_band || 'mid').toUpperCase()}`;
+                ctx.save();
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 10;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2.5;
+                ctx.strokeRect(b[0], b[1], b[2], b[3]);
+                ctx.shadowBlur = 0;
+                const labelY = Math.max(0, b[1] - 22);
+                ctx.fillStyle = color;
+                ctx.fillRect(b[0], labelY, Math.max(230, label.length * 6.8), 22);
+                ctx.fillStyle = '#040405';
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText(label, b[0] + 4, labelY + 15);
+                ctx.restore();
+                // Wheel / headlight markers (server pixel-shape recognition).
+                const sb = o._sendBox;
+                if (sb && sb[2] > 0) {
+                    for (const p of (o.parts || [])) {
+                        const px = b[0] + (sb[2] - Math.max(0, Math.min(sb[2], p.cx || 0))) * (b[2] / sb[2]);
+                        const py = b[1] + Math.max(0, Math.min(sb[3], p.cy || 0)) * (b[3] / sb[3]);
+                        const pr = Math.max(2, (p.r || 3) * (b[2] / sb[2]));
+                        ctx.save();
+                        if (p.kind === 'wheel') {
+                            ctx.strokeStyle = '#22d3ee';
+                            ctx.lineWidth = 1.5;
+                            ctx.beginPath();
+                            ctx.arc(px, py, pr, 0, Math.PI * 2);
+                            ctx.stroke();
+                        } else {
+                            ctx.fillStyle = '#fde047';
+                            ctx.beginPath();
+                            ctx.arc(px, py, pr, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        ctx.restore();
+                    }
+                }
+            }
+            // Object-count strip (top-left of the ROI).
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
+            ctx.fillRect(16, h * 0.35 + 6, 348, 26);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = 'bold 12px Inter, sans-serif';
+            const backendTxt = this.lastSemanticBackend === 'browser-cascade'
+                ? 'browser fallback' : (this.lastSemanticBackend || 'yolo');
+            ctx.fillText(`👥 ${persons} PERSON${persons === 1 ? '' : 'S'}   🚗 ${vehicles} VEHICLE${vehicles === 1 ? '' : 'S'}   🧠 ${backendTxt}`, 24, h * 0.35 + 24);
+        } else if (this.semanticVisionActive) {
+            // Semantic path live but sees nothing right now.
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.12)';
             ctx.fillRect(w * 0.22, h * 0.52, w * 0.56, 36);
-
-            ctx.strokeStyle = '#4ade80';
+            ctx.strokeStyle = '#3b82f6';
             ctx.lineWidth = 1.5;
             ctx.strokeRect(w * 0.22, h * 0.52, w * 0.56, 36);
-
-            ctx.fillStyle = '#4ade80';
+            ctx.fillStyle = '#3b82f6';
             ctx.font = 'bold 12px Inter, sans-serif';
-            ctx.fillText('🟢 SCENE CLEAR: NO DYNAMIC MOTION DETECTED (0 Objects)', w * 0.22 + 12, h * 0.52 + 22);
+            ctx.fillText('🔍 SEMANTIC SEARCH: NO PERSON / VEHICLE DETECTED (0 Objects)', w * 0.22 + 12, h * 0.52 + 22);
+        } else {
+            // Tracked-car box in its RANGE color — answers "which ring is the car in"
+            // at a glance. Label carries range + temporal confidence (master file).
+            const boxOpacity = analysis.boxOpacity ?? (analysis.motionDetected ? 1 : 0);
+            if (boxOpacity > 0 && analysis.box) {
+                const b = analysis.box;
+                const ringColor = bandMeta ? bandMeta.color : '#f43f5e';
+                const confTxt = (analysis.trackConfidence ?? 0).toFixed(2);
+                const rangeTxt = analysis.rangeBand ? analysis.rangeBand.toUpperCase() : '…';
+                const label = `🚗 CAR • ${rangeTxt} #${analysis.trackId ?? 0} • conf ${confTxt}`;
+                ctx.save();
+                ctx.globalAlpha = boxOpacity;
+                ctx.shadowColor = ringColor;
+                ctx.shadowBlur = 12;
+                ctx.strokeStyle = ringColor;
+                ctx.lineWidth = 2.5;
+                ctx.strokeRect(b.x, b.y, b.w, b.h);
+                ctx.shadowBlur = 0;
+                const labelY = Math.max(0, b.y - 22);
+                ctx.fillStyle = ringColor;
+                const labelW = Math.max(230, label.length * 7.2);
+                ctx.fillRect(b.x, labelY, labelW, 22);
+                ctx.fillStyle = '#040405';
+                ctx.font = 'bold 11px monospace';
+                ctx.fillText(label, b.x + 4, labelY + 15);
+                ctx.restore();
+            } else {
+                // SCENE CLEAR BADGE
+                ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
+                ctx.fillRect(w * 0.22, h * 0.52, w * 0.56, 36);
+
+                ctx.strokeStyle = '#4ade80';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(w * 0.22, h * 0.52, w * 0.56, 36);
+
+                ctx.fillStyle = '#4ade80';
+                ctx.font = 'bold 12px Inter, sans-serif';
+                ctx.fillText('🟢 SCENE CLEAR: NO DYNAMIC MOTION DETECTED (0 Objects)', w * 0.22 + 12, h * 0.52 + 22);
+            }
         }
 
         // 3-Ring perspective bands drawn ON the road (trapezoids converging to the

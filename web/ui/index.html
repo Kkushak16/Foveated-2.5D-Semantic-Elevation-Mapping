@@ -420,7 +420,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     </div>
                     <div class="legend-item">
                         <span><span class="legend-color" style="background:#f43f5e;"></span>Dynamic Obstacle</span>
-                        <span style="color: var(--accent-rose);">Car / Pedestrian</span>
+                        <span style="color: var(--accent-rose);">Person 🚶 / Vehicle 🚗</span>
                     </div>
                 </div>
             </div>
@@ -432,6 +432,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <div class="hud-pill" id="hud-ego-pos">X: 0.00m | Y: 0.00m | Yaw: 0.0°</div>
                     <div class="hud-pill highlight" id="hud-foveation-savings">⚡ Camera Pixel Compute Savings: 79.1%</div>
                     <div class="hud-pill" id="hud-range">🚗 CAR: NO TARGET IN ROI</div>
+                    <div class="hud-pill" id="hud-yolo">🧠 YOLO: standby</div>
                 </div>
 
                 <!-- Canvases -->

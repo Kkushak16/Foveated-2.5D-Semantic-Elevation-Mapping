@@ -37,3 +37,16 @@ pillow>=9.0
 # ultralytics         # YOLOv5 hub integration
 # opencv-python>=4.8  # Needed for frame processing & annotation
 # seaborn>=0.11       # YOLOv5 training visualisation
+
+# Semantic shape recognition for the browser dashboard (YOLO vision server).
+# python/yolo_vision_server.py streams webcam frames over WebSockets and
+# returns per-object detections (person / car / truck / bus / motorcycle /
+# bicycle + wheel & headlight markers). websockets is REQUIRED for that path;
+# without it the dashboard still tracks every person using its built-in
+# browser cascade (no extra deps beyond opencv/numpy).
+websockets>=12
+ultralytics>=8.0     # Real YOLOv8n pixel inspection (person + vehicle shapes).
+                     # Installed in .venv (8.4.145 verified). With it the server
+                     # resolves backend=yolov8n; without it the server falls
+                     # back to YOLOv5 (torch Hub, needs network once) then to
+                     # an offline cv-cascade.
