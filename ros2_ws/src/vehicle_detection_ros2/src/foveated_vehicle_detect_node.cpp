@@ -45,19 +45,35 @@ public:
     executor_thread_ = std::thread([this] { this->executor_->spin(); });
 
     // CUDA stream for non‑blocking kernel launches
-    cudaStream_t cuda_stream_;
     cudaError_t cuda_err = cudaStreamCreateWithFlags(&cuda_stream_, cudaStreamNonBlocking);
     if (cuda_err != cudaSuccess) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to create CUDA stream – falling back to default stream");
-      cuda_stream_ = 0; // default stream
+        RCLCPP_ERROR(this->get_logger(), "Failed to create CUDA stream – falling back to default stream");
+        cuda_stream_ = 0; // default stream
     }
-
+    // Allocate GPU grid cells for projection kernel (400x400)
+    const int grid_dim = 400;
+    grid_cells_bytes_ = static_cast<size_t>(grid_dim) * grid_dim * sizeof(lidar_mapping::cuda::GPUGridCell);
+    cudaError_t alloc_err = cudaMalloc(&d_grid_cells_, grid_cells_bytes_);
+    if (alloc_err != cudaSuccess) {
+        RCLCPP_ERROR(this->get_logger(), "CUDA allocation for grid cells failed – disabling CUDA kernel.");
+        d_grid_cells_ = nullptr;
+    } else {
+        cudaMemset(d_grid_cells_, 0, grid_cells_bytes_);
+    }
   }
 
   ~FoveatedVehicleDetectNode() {
     shutdown_ = true;
     cv.notify_all();
     if (worker_thread_.joinable()) worker_thread_.join();
+    if (d_grid_cells_) {
+      cudaFree(d_grid_cells_);
+      d_grid_cells_ = nullptr;
+    }
+    if (cuda_stream_) {
+      cudaStreamDestroy(cuda_stream_);
+      cuda_stream_ = 0;
+    }
   }
 
 private:
@@ -143,8 +159,9 @@ private:
   }
 
   // -------------------------------------------------------------------
-  // Member variables
-  // -------------------------------------------------------------------
+    cudaStream_t cuda_stream_{0};
+    lidar_mapping::cuda::GPUGridCell* d_grid_cells_{nullptr};
+    size_t grid_cells_bytes_{0};
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
