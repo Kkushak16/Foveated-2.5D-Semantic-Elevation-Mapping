@@ -1,5 +1,5 @@
 # 🛰️ Foveated 2.5D LiDAR & Camera Perception System
-### Real-Time Semantic Elevation Mapping & Multi-Object Visual Telemetry for Autonomous Vehicles
+### Real-Time Semantic Elevation Mapping, 3D World Simulation & Multi-Object Visual Telemetry
 
 [![GitHub Actions CI](https://github.com/Kkushak16/Foveated-2.5D-Semantic-Elevation-Mapping/actions/workflows/cmake-single-platform.yml/badge.svg)](https://github.com/Kkushak16/Foveated-2.5D-Semantic-Elevation-Mapping/actions)
 [![Deploy Pages](https://github.com/Kkushak16/Foveated-2.5D-Semantic-Elevation-Mapping/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/Kkushak16/Foveated-2.5D-Semantic-Elevation-Mapping/actions)
@@ -11,21 +11,26 @@
 
 A high-throughput, multi-sensor perception pipeline that converts dense, noisy 3D LiDAR point clouds and camera video feeds into an **adaptive 2.5D semantic elevation grid** in real time. 
 
-Inspired by **human foveated vision**, the system allocates maximum compute and resolution to the immediate driving corridor while progressively downsampling distant space — slashing memory consumption by **~82%** and GPU inference overhead by **~79%**.
+Inspired by **human foveated vision**, the system allocates maximum compute and resolution to the immediate driving corridor while progressively downsampling distant space — slashing memory consumption by **~82%** and GPU inference overhead by **~79%**. Includes a rich **WebGL 3D World Simulator** featuring autonomous pure-pursuit driving, 2nd-order suspension physics with dynamic body roll, continuous traffic loops, and dual-sensor teleoperation.
 
 ---
 
-## 📸 System Previews
+## 📸 System Visual Gallery & Simulation Showcase
 
-| **1. Dual-Sensor Teleoperation Dashboard (LiDAR BEV + Camera Foveation)** |
+| **1. 3D Virtual World Simulation (Pure-Pursuit Autopilot & 2nd-Order Body Roll)** |
 |:---:|
-| ![Dual-Sensor Teleop Dashboard](docs/images/dashboard_phase3.png) |
-| *Real-time dual-sensor telemetry: 2.5D multi-ring LiDAR Bird's-Eye View (left) synchronized with camera foveated ROI gating and tracking (right).* |
+| ![3D Virtual World Simulation](docs/images/sim_3d_world_live.png) |
+| *Real-time WebGL 3D simulation: Autonomous vehicle with Newtonian spring-damper suspension physics and dynamic body roll, navigating dark asphalt highway lanes with 3 concentric holographic LiDAR rings (Near 10m, Mid 30m, Far 70m), continuous cruising traffic, and sidewalk pedestrians.* |
 
-| **2. Real-Time Camera Gating & YOLO Semantic Vision** | **3. LiDAR Ground Segmentation & Point Cloud Processing** |
+| **2. Dual-Sensor Teleoperation Split View** | **3. Multi-Ring LiDAR Bird's-Eye View (BEV)** |
 |:---:|:---:|
-| ![Camera Gating](docs/images/live_stream.png) | ![LiDAR Segmentation](docs/images/viewer_phase1.png) |
-| *Active foveated region-of-interest (middle 50%) masking sky (35%) and hood (15%) with dynamic multi-object tracking.* | *Patchwork++ & RANSAC ground surface extraction separating drivable road (green) from obstacles (red).* |
+| ![Dual-Sensor Teleop Split View](docs/images/dual_split_live.png) | ![LiDAR BEV Grid](docs/images/lidar_bev_grid_live.png) |
+| *Dual-Split teleoperation: Synchronized 3-ring LiDAR BEV grid (left) alongside live camera foveation with near/mid/far depth perspective bands and sky/hood spatial masking (right).* | *Full 2.5D BEV elevation grid: 3 concentric resolution tiers (Near 5cm, Mid 15cm, Far 50cm), bounding box classification, distance badges, and negative obstacle (pothole) markers.* |
+
+| **4. Camera Foveation with Active ROI & Depth Bands** | **5. Interactive Teleoperation Landing Interface** |
+|:---:|:---:|
+| ![Camera Foveation](docs/images/camera_foveation_live.png) | ![Landing Hero Interface](docs/images/landing_hero.png) |
+| *Spatial horizon gating: Discards static non-road pixels (sky 35% and hood 15%) while applying optical-flow motion gating and depth-scaled detection boxes to dynamic obstacles.* | *Interactive browser HUD interface featuring instant view mode switching, live camera feed selection, LiDAR point cloud controls, and real-time compute savings telemetry.* |
 
 ---
 
@@ -38,6 +43,7 @@ This software solves that bottleneck:
 2. **Projects 3D Points into an Adaptive 2.5D Ego-Grid**: Uses high-speed CUDA kernels ($< 1.8\text{ ms}$) or optimized C++ ring buffers to project 3D point clouds into concentric elevation cells.
 3. **Aligns Camera Vision via Dual Foveation**: Eliminates static non-road pixels (sky and vehicle hood), extracting features and tracking objects (cars, pedestrians, cyclists) only where obstacles can realistically appear.
 4. **Publishes Planning-Ready Maps**: Emits standardized `nav_msgs/msg/OccupancyGrid` messages to ROS 2 navigation stacks and streams WebSocket telemetry to lightweight WebGL browser dashboards.
+5. **Simulates Full Autonomous Environments**: Built-in 3D simulation with dynamic vehicle physics, pure-pursuit path tracking, sidewalk pedestrians, and continuous traffic loops.
 
 ---
 
@@ -132,15 +138,49 @@ Each grid cell stores a compact **Struct-of-Arrays (SoA)**:
 
 ---
 
-## ⚙️ Installation & Setup
+## 🏎️ Autonomous Vehicle Physics & Simulation Engine
+
+The included 3D world simulator runs a realistic vehicle model with continuous physics:
+
+* **Pure Pursuit Lane Following**: Monotonically advancing lookahead waypoint pursuit tracking the center of the right driving lane ($R = 37.5\text{m}$). Calculates exact curvature $\delta = \text{atan2}(2 L_w \cdot \text{lateral}, L^2)$ with speed-adaptive lookahead ($7.5\text{m} - 16.0\text{m}$) for smooth cornering.
+* **2nd-Order Spring-Damper Body Roll**: Realistic chassis lean outward during cornering:
+  $$\ddot{\theta}_{\text{roll}} = -k_{\text{roll}}(\theta_{\text{roll}} - \theta_{\text{target}}) - c_{\text{roll}}\dot{\theta}_{\text{roll}}$$
+  where $\theta_{\text{target}} = \text{clamp}(-a_{\text{lat}} \cdot 0.038, -0.14, 0.14\text{ rad})$ ($k_{\text{roll}} = 92.0$, $c_{\text{roll}} = 13.5$).
+* **Pitch Dive & Squat**: Chassis pitches forward during braking (dive up to $-0.09\text{ rad}$) and squats during acceleration ($+0.06\text{ rad}$).
+* **Dynamic Wheel Camber**: Front wheels tilt slightly into the turn direction when steered.
+* **Continuous Traffic Loop**: Cruising sedans and SUVs loop continuously around a 500-meter closed circuit without despawning or teleporting.
+* **Sidewalk Pedestrians**: 12 articulated pedestrians walking along designated sidewalks ($X = \pm 43.5\text{m}$), park paths, and crossing at dedicated zebra crosswalks ($Z = \pm 20\text{m}$).
+* **Zero Phantom Walls**: Dual-disk vehicle capsules ($1.9\text{m}$ clearance) eliminate phantom collisions next to parked vehicles.
+
+---
+
+## 🎮 Interactive Controls & Cheatsheet
+
+When running the interactive teleoperation interface, the vehicle and cameras can be controlled via keyboard:
+
+| Control | Key | Action |
+|:---|:---:|:---|
+| **Throttle / Accelerate** | `W` or `↑` | Accelerate ego vehicle forward |
+| **Reverse** | `S` or `↓` | Drive ego vehicle in reverse |
+| **Steer Left** | `A` or `←` | Steer wheels left (non-mirrored) |
+| **Steer Right** | `D` or `→` | Steer wheels right (non-mirrored) |
+| **Handbrake** | `Space` | Apply emergency braking with reactive taillights |
+| **Toggle Autopilot** | `P` | Switch between Autonomous Lane-Following & Manual Control |
+| **Cycle Cameras** | `C` | Switch camera between **Chase**, **Cockpit**, and **Overhead** |
+| **View Modes** | UI Buttons | Switch between **3D World**, **Dual-Sensor Split**, **LiDAR BEV**, and **Camera Foveation** |
+| **Sensor Sources** | UI Dropdown | Select **3D Sim Windshield**, **Live Physical Webcam**, or **Synthetic Benchmark** |
+
+---
+
+## ⚙️ Complete Setup & Installation Guide
 
 ### Prerequisites
-* **Operating System**: Linux (Ubuntu 20.04 / 22.04 LTS recommended) or Windows 10/11.
+* **Operating System**: Linux (Ubuntu 20.04 / 22.04 LTS) or Windows 10/11.
 * **Python**: Python 3.10+ (with `pip` and virtual environment support).
 * **C++ Compiler**: GCC 9+, Clang 11+, or MSVC 2019+ (C++17 standard required).
 * **CMake**: Version 3.18 or higher.
-* **Node.js**: v18 or higher (optional, for the telemetry WebSocket bridge).
-* **Optional Hardware Acceleration**: NVIDIA GPU with CUDA 11.8+ / 12.x and TensorRT 8.x. *(CPU fallback is included automatically if no GPU is detected).*
+* **Node.js**: v18+ (optional, for the static server and WebSocket telemetry bridge).
+* **CUDA / GPU (Optional)**: NVIDIA GPU with CUDA 11.8+ / 12.x and TensorRT 8.x. *(CPU fallback is included automatically if no GPU is detected).*
 
 ---
 
@@ -152,13 +192,32 @@ cd Foveated-2.5D-Semantic-Elevation-Mapping
 
 ---
 
-### Step 2: Set Up Python Environment
-Create and activate an isolated Python virtual environment:
+### Step 2: Instant Web Simulation (No Heavy Dependencies)
+You can immediately launch and explore the 3D world simulation and telemetry dashboard using any local static server:
+
+#### Option A: Using Node.js
+```bash
+node -e "const http=require('http'),fs=require('fs'),path=require('path');const mime={'.html':'text/html','.js':'application/javascript','.css':'text/css','.png':'image/png'};http.createServer((req,res)=>{let f=path.join('web/ui',req.url.split('?')[0]);if(f.endsWith('/')||fs.statSync(f,{throwIfNoEntry:false})?.isDirectory())f=path.join(f,'index.html');if(fs.existsSync(f)){res.setHeader('Content-Type',mime[path.extname(f)]||'text/plain');fs.createReadStream(f).pipe(res);}else{res.statusCode=404;res.end('Not found');}}).listen(8080,()=>console.log('Dashboard ready at http://localhost:8080'));"
+```
+
+#### Option B: Using Python
+```bash
+python -m http.server 8080 --directory web/ui
+```
+
+Then open your browser and navigate to:
+👉 **`http://localhost:8080`**
+
+---
+
+### Step 3: Python Machine Learning & Vision Environment
+For running the YOLO semantic detector, WebSocket telemetry bridge, and offline evaluation pipeline:
 
 **Linux / macOS:**
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -166,87 +225,43 @@ pip install -r requirements.txt
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+#### Launch Python Vision & Telemetry Server:
+```bash
+# Unified entrypoint for local dashboard + Streamlit integration:
+python app.py
+
+# Or run the dedicated YOLO WebSocket vision server:
+python python/yolo_vision_server.py --port 8765 --conf 0.45
 ```
 
 ---
 
-### Step 3: Build the High-Performance C++ / CUDA Core
-The build system uses CMake. If `nvcc` is detected, CUDA parallel kernels are compiled automatically; otherwise, it builds with the native multi-threaded CPU fallback:
+### Step 4: Build the High-Performance C++ / CUDA Core
+The build system uses CMake. If `nvcc` is detected on your system, CUDA SIMT projection kernels are compiled automatically; otherwise, the native multi-threaded C++17 CPU fallback is built:
 
 ```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
-cmake --build . --config Release
+cmake --build . --config Release --parallel
 ```
 
-Run internal unit and integration benchmarks:
+#### Run Unit & Integration Tests:
 ```bash
 ctest --output-on-failure
 ```
 
 ---
 
-### Step 4: Launch the Web Teleoperation Dashboard
-You can run the web dashboard using either Python or Node.js:
+### Step 5: ROS 2 Humble / Iron Workspace Setup
+If you are running the system inside an autonomous vehicle software stack with ROS 2:
 
-#### Option A: Unified Python / Streamlit Server (Recommended)
-```bash
-# Standalone local HTTP server (serves at http://localhost:8080):
-py app.py
-
-# Or embed inside Streamlit:
-streamlit run app.py
-```
-
-#### Option B: Node.js WebSocket Bridge + YOLO Vision Server
-```bash
-node web/server/websocket_bridge.js 8080
-```
-Then open your browser and navigate to:
-👉 **`http://localhost:8080`**
-
----
-
-## 🔌 How to Connect & Test with LiDAR
-
-You can test this software with **live physical LiDAR hardware**, **ROS 2 bag recordings**, or **offline open datasets**.
-
-### 1. Live Hardware Connection (Ethernet UDP)
-
-Most industrial and automotive LiDAR sensors broadcast raw packet data over UDP Ethernet:
-
-```
-[ LiDAR Sensor ] ──(Ethernet RJ45)──► [ Network Switch / NIC ] ──► [ C++ Driver / ROS 2 ]
-IP: 192.168.1.201                      Static IP: 192.168.1.100         UDP Port: 2368
-```
-
-1. **Configure Host Network Interface**:
-   * Set your machine's Ethernet adapter to a static IP on the same subnet (e.g. IP: `192.168.1.100`, Subnet Mask: `255.255.255.0`).
-2. **Launch the Native C++ Ingestion Driver**:
-   * The built-in driver in [`cpp/src/lidar_driver.cpp`](cpp/src/lidar_driver.cpp) binds directly to UDP port `2368`:
-     ```bash
-     ./build/foveated_lidar_onboard_node --port 2368 --rate 10
-     ```
-
----
-
-### 2. Testing via ROS 2 (Humble / Iron)
-
-If your LiDAR already has an official ROS 2 driver node running:
-
-| LiDAR Manufacturer | Official ROS 2 Driver Package | Default Output Topic |
-|:---|:---|:---|
-| **Velodyne** (VLP-16, VLP-32C, Puck) | `ros-humble-velodyne` | `/velodyne_points` |
-| **Ouster** (OS0, OS1, OS2) | `ros-humble-ouster-ros` | `/ouster/points` |
-| **Livox** (Mid-360, HAP) | `livox_ros_driver2` | `/livox/lidar` |
-| **Hesai** (Pandar40P, QT64) | `hesai_ros_driver` | `/hesai/pandar` |
-
-Remap your sensor topic to our input pipeline:
 ```bash
 cd ros2_ws
-colcon build --packages-select vehicle_detection_ros2
+colcon build --packages-select vehicle_detection_ros2 --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
 # Run our foveated projection node:
@@ -254,27 +269,69 @@ ros2 run vehicle_detection_ros2 foveated_vehicle_detect_node \
   --ros-args -r /sensing/lidar/top/pointcloud_raw:=/velodyne_points
 ```
 
-Our node will process incoming `sensor_msgs/msg/PointCloud2` frames and publish the 2.5D ego-grid to:
-* **`/planning/foveated_ego_grid`** (`nav_msgs/msg/OccupancyGrid`)
+Output topics published:
+* `/planning/foveated_ego_grid` (`nav_msgs/msg/OccupancyGrid`)
+* `/perception/elevation_markers` (`visualization_msgs/msg/MarkerArray`)
 
 ---
 
-### 3. Testing Without Hardware (Pre-Recorded Data & Synthetic Stream)
+## 🔌 Hardware Sensor Setup & Physical Testing
 
-You do not need a physical LiDAR to test the software:
+You can run this software with **live physical LiDAR hardware**, **webcam / CSI cameras**, **ROS 2 bag recordings**, or **offline open datasets**.
 
-* **In-Browser Synthetic Benchmark**:
-  Open the web dashboard and select **"🤖 Synthetic Benchmark Stream"** from the control panel. The engine will simulate 100,000 LiDAR points, dynamic obstacles in circular orbit, and perspective ground points.
-* **SemanticKITTI Dataset Playback**:
-  Download sample `.bin` point clouds from SemanticKITTI and run our offline validation tool:
+```
+                           [ Physical Vehicle Setup ]
+    ┌───────────────────────────────┐     ┌──────────────────────────────┐
+    │     3D Automotive LiDAR       │     │    Front Automotive Camera   │
+    │ (Velodyne / Ouster / Hesai)   │     │   (USB Webcam / Sony IMX)    │
+    └───────────────┬───────────────┘     └──────────────┬───────────────┘
+                    │ Ethernet (RJ45)                    │ USB 3.0 / CSI-2
+                    ▼                                    ▼
+       ┌────────────────────────┐           ┌────────────────────────┐
+       │   Static IP / Switch   │           │   V4L2 Device Driver   │
+       │   192.168.1.100 (Host) │           │     /dev/video0        │
+       └───────────┬────────────┘           └────────────┬───────────┘
+                   │ UDP Packets                         │ BGR Frames
+                   └──────────────────┬──────────────────┘
+                                      ▼
+                    ┌──────────────────────────────────┐
+                    │    NVIDIA Jetson / Onboard PC    │
+                    │   Foveated 2.5D Fusion Engine    │
+                    └──────────────────────────────────┘
+```
+
+### 1. Connecting Physical LiDAR Hardware (Ethernet UDP)
+
+1. **Network Interface Configuration**:
+   * Connect the sensor RJ45 cable to your computer or vehicle switch.
+   * Assign a static IP on the sensor's subnet (e.g., LiDAR IP: `192.168.1.201`, Computer IP: `192.168.1.100`, Subnet: `255.255.255.0`).
+2. **Launch the Native C++ UDP Ingestion Driver**:
+   ```bash
+   ./build/foveated_lidar_onboard_node --port 2368 --rate 10
+   ```
+3. **Supported LiDAR Sensors**:
+   * **Velodyne**: VLP-16, Puck LITE, Ultra Puck VLP-32C, Alpha Prime VLS-128
+   * **Ouster**: OS0-32/64/128, OS1-32/64/128, OS2-64/128
+   * **Livox**: Mid-360, Mid-70, HAP (via `livox_ros_driver2`)
+   * **Hesai**: Pandar40P, PandarXT-32, QT64
+
+### 2. Connecting Physical Cameras (USB / CSI / RTSP)
+
+* **Webcam / USB Camera**:
+  Select **"📷 Live Camera (Physical Webcam)"** from the web UI control panel, or configure device index in Python:
   ```bash
-  py python/run_offline_pipeline.py --scan my_dataset/000000.bin
+  python python/camera_foveated_processor.py --source 0 --width 1280 --height 720
   ```
-* **Offline YOLO Semantic Shape Test**:
-  Verify the person, vehicle, wheel, and headlight detector:
+* **RTSP IP Camera Stream**:
   ```bash
-  py python/test_semantic_vision.py
+  python python/camera_foveated_processor.py --source "rtsp://admin:pass@192.168.1.64:554/h264Preview_01_main"
   ```
+
+### 3. Testing with SemanticKITTI Datasets
+Download sample `.bin` point clouds from SemanticKITTI and run our offline validation tool:
+```bash
+python python/run_offline_pipeline.py --scan my_dataset/000000.bin
+```
 
 ---
 
@@ -304,7 +361,12 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 │   ├── cmake-single-platform.yml # Continuous Integration (ctest on Ubuntu)
 │   └── deploy-pages.yml          # Automated GitHub Pages web dashboard deployment
 ├── docs/
-│   └── images/                   # PNG screenshots & dashboard previews
+│   └── images/                   # High-res simulation captures & system architecture diagrams
+│       ├── sim_3d_world_live.png     # 3D city world with pure pursuit & body roll
+│       ├── dual_split_live.png       # Dual-sensor split view (LiDAR BEV + Camera)
+│       ├── lidar_bev_grid_live.png   # Full 3-ring BEV grid with distance labels
+│       ├── camera_foveation_live.png # Camera foveation with depth bands & ROI masking
+│       └── landing_hero.png          # Interactive HUD landing page
 ├── cpp/                          # Modern C++ Core (Deterministic, Zero-GC)
 │   ├── include/                  # Headers: Ring buffer, LiDAR driver, ROS 2, TensorRT
 │   └── src/                      # Low-latency C++ implementations
@@ -314,14 +376,18 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 ├── ros2_ws/                      # ROS 2 Colcon Workspace
 │   └── src/vehicle_detection_ros2/
 │       └── src/foveated_vehicle_detect_node.cpp  # Multi-threaded ROS 2 node
-├── python/                       # Offline Machine Learning & Vision Servers
+├── python/                       # Machine Learning, Vision Servers & Offline Pipeline
 │   ├── semantic_detector.py      # Multi-backend detector (YOLOv8 / OpenCV HOG cascade)
 │   ├── yolo_vision_server.py     # High-speed WebSocket vision server for dashboard
 │   ├── test_semantic_vision.py   # Test suite for static persons, vehicles & wheel parts
 │   └── camera_foveated_processor.py # 3-ring optical flow & ROI cropping
 └── web/                          # Teleoperation Dashboard UI & Bridges
     ├── server/websocket_bridge.js# Node.js HTTP & telemetry WebSocket bridge
-    └── ui/                       # HTML5, CSS3, & WebGL 3-Ring HUD interface
+    └── ui/                       # HTML5, CSS3, Three.js 3D Simulator & WebGL HUD
+        ├── index.html            # Main dashboard interface
+        ├── three_simulator.js    # 3D WebGL Simulator with suspension & pure pursuit
+        ├── teleop_dashboard.js   # Teleoperation canvas renderers & sensor fusion
+        └── three.min.js          # Three.js 3D library
 ```
 
 ---
