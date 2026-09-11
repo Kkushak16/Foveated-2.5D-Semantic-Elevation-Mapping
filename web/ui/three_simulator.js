@@ -1094,45 +1094,112 @@
         _initHolographicLidarRings() {
             const ringsGroup = new THREE.Group();
 
-            // Colored Holographic Semantic LiDAR Rings with glow
-            // Near: Cyan (#38bdf8), Mid: Purple (#c084fc), Far: Orange (#fb923c)
-
+            // Dark Semantic LiDAR Rings with High-Contrast Channel & Crisp Accent Rails
+            // Matches BEV 3-Ring design: deep dark slate/black annular lane (0x020617)
+            // so the rings read as crisp, dark demarcations instead of washed-out light lines.
             const ringConfigs = [
-                { inner: 9.0,  outer: 11.0, color: 0x38bdf8, opacity: 0.85, y: 0.15, label: 'NEAR 0–10m (5cm)', labelDist: 10 },
-                { inner: 29.0, outer: 31.0, color: 0xc084fc, opacity: 0.75, y: 0.13, label: 'MID 10–30m (15cm)', labelDist: 30 },
-                { inner: 68.5, outer: 71.5, color: 0xfb923c, opacity: 0.65, y: 0.11, label: 'FAR 30–70m (50cm)', labelDist: 70 }
+                {
+                    r: 10.0,
+                    darkInner: 8.6,
+                    darkOuter: 11.4,
+                    railInner: 9.85,
+                    railOuter: 10.15,
+                    color: 0x38bdf8,
+                    accentHex: '#38bdf8',
+                    y: 0.12,
+                    label: 'NEAR 0–10m (5cm)',
+                    labelDist: 10
+                },
+                {
+                    r: 30.0,
+                    darkInner: 28.5,
+                    darkOuter: 31.5,
+                    railInner: 29.85,
+                    railOuter: 30.15,
+                    color: 0xc084fc,
+                    accentHex: '#c084fc',
+                    y: 0.10,
+                    label: 'MID 10–30m (15cm)',
+                    labelDist: 30
+                },
+                {
+                    r: 70.0,
+                    darkInner: 68.0,
+                    darkOuter: 72.0,
+                    railInner: 69.80,
+                    railOuter: 70.20,
+                    color: 0xfb923c,
+                    accentHex: '#fb923c',
+                    y: 0.08,
+                    label: 'FAR 30–70m (50cm)',
+                    labelDist: 70
+                }
             ];
 
             ringConfigs.forEach(cfg => {
-                // Semi-transparent colored fill ring
-                const fillMat = new THREE.MeshBasicMaterial({
-                    color: cfg.color,
+                // 1. Prominent Dark Annular Lane Body (crisp dark black/slate channel)
+                const darkLaneMat = new THREE.MeshBasicMaterial({
+                    color: 0x020617,
                     transparent: true,
-                    opacity: cfg.opacity,
+                    opacity: 0.94,
                     side: THREE.DoubleSide,
                     depthWrite: false
                 });
-                const fillGeo = new THREE.RingGeometry(cfg.inner, cfg.outer, 96);
-                const fillMesh = new THREE.Mesh(fillGeo, fillMat);
-                fillMesh.rotation.x = -Math.PI / 2;
-                fillMesh.position.y = cfg.y;
-                ringsGroup.add(fillMesh);
+                const darkLaneGeo = new THREE.RingGeometry(cfg.darkInner, cfg.darkOuter, 96);
+                const darkLaneMesh = new THREE.Mesh(darkLaneGeo, darkLaneMat);
+                darkLaneMesh.rotation.x = -Math.PI / 2;
+                darkLaneMesh.position.y = cfg.y;
+                ringsGroup.add(darkLaneMesh);
 
-                // Bright outline edge ring (thin bright line on the outer edge)
-                const edgeMat = new THREE.MeshBasicMaterial({
-                    color: cfg.color,
+                // 2. Dark inner & outer border rims (pure dark edge definition)
+                const darkBorderMat = new THREE.MeshBasicMaterial({
+                    color: 0x000000,
                     transparent: true,
-                    opacity: Math.min(1.0, cfg.opacity + 0.35),
+                    opacity: 0.98,
                     side: THREE.DoubleSide,
                     depthWrite: false
                 });
-                const edgeOuter = new THREE.RingGeometry(cfg.outer - 0.15, cfg.outer, 96);
-                const edgeMesh = new THREE.Mesh(edgeOuter, edgeMat);
-                edgeMesh.rotation.x = -Math.PI / 2;
-                edgeMesh.position.y = cfg.y + 0.02;
-                ringsGroup.add(edgeMesh);
+                const borderInnerGeo = new THREE.RingGeometry(cfg.darkInner - 0.15, cfg.darkInner + 0.05, 96);
+                const borderInnerMesh = new THREE.Mesh(borderInnerGeo, darkBorderMat);
+                borderInnerMesh.rotation.x = -Math.PI / 2;
+                borderInnerMesh.position.y = cfg.y + 0.005;
+                ringsGroup.add(borderInnerMesh);
 
-                // Text label sprite at cardinal positions (North and East)
+                const borderOuterGeo = new THREE.RingGeometry(cfg.darkOuter - 0.05, cfg.darkOuter + 0.15, 96);
+                const borderOuterMesh = new THREE.Mesh(borderOuterGeo, darkBorderMat);
+                borderOuterMesh.rotation.x = -Math.PI / 2;
+                borderOuterMesh.position.y = cfg.y + 0.005;
+                ringsGroup.add(borderOuterMesh);
+
+                // 3. Crisp Coloured Center Rail / Indicator Line atop the dark lane
+                const railMat = new THREE.MeshBasicMaterial({
+                    color: cfg.color,
+                    transparent: true,
+                    opacity: 0.96,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                });
+                const railGeo = new THREE.RingGeometry(cfg.railInner, cfg.railOuter, 96);
+                const railMesh = new THREE.Mesh(railGeo, railMat);
+                railMesh.rotation.x = -Math.PI / 2;
+                railMesh.position.y = cfg.y + 0.015;
+                ringsGroup.add(railMesh);
+
+                // 4. Subtle semantic colored tint across the dark lane for depth
+                const tintMat = new THREE.MeshBasicMaterial({
+                    color: cfg.color,
+                    transparent: true,
+                    opacity: 0.16,
+                    side: THREE.DoubleSide,
+                    depthWrite: false
+                });
+                const tintGeo = new THREE.RingGeometry(cfg.darkInner, cfg.darkOuter, 96);
+                const tintMesh = new THREE.Mesh(tintGeo, tintMat);
+                tintMesh.rotation.x = -Math.PI / 2;
+                tintMesh.position.y = cfg.y + 0.01;
+                ringsGroup.add(tintMesh);
+
+                // 5. Dark Text label pill sprites at cardinal positions (North and East)
                 const labelPositions = [
                     { x: 0, z: -cfg.labelDist },  // North
                     { x: cfg.labelDist, z: 0 }     // East
@@ -1143,24 +1210,29 @@
                     canvas.height = 48;
                     const lctx = canvas.getContext('2d');
                     lctx.clearRect(0, 0, 256, 48);
-                    lctx.fillStyle = `rgba(0, 0, 0, 0.6)`;
-                    lctx.roundRect(0, 4, 256, 40, 6);
+
+                    // Solid dark obsidian pill
+                    lctx.fillStyle = 'rgba(2, 6, 23, 0.95)';
+                    lctx.roundRect(0, 4, 256, 40, 8);
                     lctx.fill();
-                    const hexStr = '#' + cfg.color.toString(16).padStart(6, '0');
-                    lctx.strokeStyle = hexStr;
-                    lctx.lineWidth = 2;
-                    lctx.roundRect(0, 4, 256, 40, 6);
+
+                    // Bold border in ring accent color
+                    lctx.strokeStyle = cfg.accentHex;
+                    lctx.lineWidth = 2.5;
+                    lctx.roundRect(0, 4, 256, 40, 8);
                     lctx.stroke();
-                    lctx.fillStyle = hexStr;
-                    lctx.font = 'bold 22px sans-serif';
+
+                    // Crisp high-legibility text
+                    lctx.fillStyle = '#f8fafc';
+                    lctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
                     lctx.textAlign = 'center';
-                    lctx.fillText(cfg.label, 128, 32);
+                    lctx.fillText(cfg.label, 128, 31);
 
                     const tex = new THREE.CanvasTexture(canvas);
                     tex.minFilter = THREE.LinearFilter;
                     const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
                     const sprite = new THREE.Sprite(spriteMat);
-                    sprite.position.set(pos.x, 2.5, pos.z);
+                    sprite.position.set(pos.x, 2.2, pos.z);
                     sprite.scale.set(8, 1.5, 1);
                     ringsGroup.add(sprite);
                 });

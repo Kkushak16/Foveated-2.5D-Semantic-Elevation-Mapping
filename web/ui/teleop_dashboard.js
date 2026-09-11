@@ -1213,33 +1213,56 @@ class UnifiedTeleopEngine {
         ctx.moveTo(0, cy); ctx.lineTo(w, cy);
         ctx.stroke();
 
-        // 3-Ring Concentric Boundaries
+        // 3-Ring Concentric Boundaries — drawn with a dark annular halo plus a
+        // bold coloured stroke so the rings read as crisp dark lanes instead of
+        // thin light lines lost in the point-cloud noise.
         const scale = Math.min(w, h) / 220;
         const rNear = 10 * scale * 2;
         const rMid = 30 * scale * 2;
         const rFar = 100 * scale * 2;
 
-        // Far Ring (Orange) - 30m to 100m
-        ctx.strokeStyle = '#fb923c';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([6, 6]);
-        ctx.beginPath();
-        ctx.arc(cx, cy, rFar, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Mid Ring (Purple) - 10m to 30m
-        ctx.strokeStyle = '#c084fc';
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.arc(cx, cy, rMid, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Near Ring (Cyan) - 0m to 10m
-        ctx.strokeStyle = '#38bdf8';
+        // Near Ring (Cyan) - 0m to 10m (solid — highest safety priority)
+        ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';
+        ctx.lineWidth = 9;
         ctx.setLineDash([]);
         ctx.beginPath();
         ctx.arc(cx, cy, rNear, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([10, 5]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rNear, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Mid Ring (Purple) - 10m to 30m
+        ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';
+        ctx.lineWidth = 9;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rMid, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = '#c084fc';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([8, 5]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rMid, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Far Ring (Orange) - 30m to 100m
+        ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';
+        ctx.lineWidth = 9;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rFar, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = '#fb923c';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([14, 6]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rFar, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
 
         // Point Cloud Generation - In Stationary Mode, points remain FIXED relative to ground!
         // Legend mapping (Semantic Ring Legend): ground #34d399, near #38bdf8,
@@ -1310,7 +1333,11 @@ class UnifiedTeleopEngine {
 
         // Collect all actors for BEV projection (from 3D simulator directly)
         const bevActors = [];
-        if (window.threeSim) {
+        // The BEV must reflect the ACTIVE camera sensor. While the live physical
+        // webcam (or the synthetic benchmark stream) is selected, the 3D
+        // simulation's pedestrians/vehicles must NOT be projected onto the grid —
+        // only what the active camera actually perceives may appear.
+        if (window.threeSim && this.cameraSource === 'simulator') {
             const ego = window.threeSim.ego;
             const fwdX = -Math.sin(ego.yaw);
             const fwdZ = -Math.cos(ego.yaw);
@@ -1348,9 +1375,25 @@ class UnifiedTeleopEngine {
             });
         }
 
-        // Also include camera-only targets (for webcam/synthetic when no 3D sim)
-        if (!window.threeSim || bevActors.length === 0) {
-            for (const t of this.cameraTargets) {
+        // Camera-only targets — these are the SOLE actors for the live physical
+        // webcam (every object the cascade/YOLO sees in the camera frame, i.e. the
+        // obstruction in front of the lens, is fused into the BEV through
+        // `cameraTargets`). They are excluded only while the 3D simulator is the
+        // active camera source (its real actors are projected above).
+        if (this.cameraSource !== 'simulator' || !window.threeSim || bevActors.length === 0) {
+            // For the synthetic benchmark stream, reuse the same foveation
+            // detections so the BEV and camera panels show identical obstacles.
+            let camTargets = this.cameraTargets;
+            if (this.cameraSource === 'synthetic' && !camTargets.length) {
+                camTargets = this._getSyntheticDetectedObjects(w, h).map(d => ({
+                    bearing01: d.bearing01,
+                    rangeBand: d.rangeBand,
+                    color: this.semanticLabelColor(d.label),
+                    label: d.label,
+                    conf: d.confidence,
+                }));
+            }
+            for (const t of camTargets) {
                 const dist = RANGE_DIST[t.rangeBand] || 20;
                 const bearing = (t.bearing01 - 0.5) * Math.PI;
                 bevActors.push({
@@ -1433,8 +1476,9 @@ class UnifiedTeleopEngine {
             ctx.restore();
         });
 
-        // Demo obstacles in circular orbit mode (kept alongside camera tracks)
-        if (this.motionMode === 'circular') {
+        // Demo obstacles in circular orbit mode — simulator-only, so they are
+        // hidden whenever the physical camera (or synthetic stream) is active.
+        if (this.motionMode === 'circular' && this.cameraSource === 'simulator') {
             for (let o = 0; o < 4; o++) {
                 const oAngle = (o * 90 + this.frame * 0.8) * (Math.PI / 180);
                 const oDist = 15 + Math.sin(this.frame * 0.05 + o) * 8;
@@ -1450,7 +1494,9 @@ class UnifiedTeleopEngine {
 
         // 2.5D LiDAR Elevation Deficit Hazards (Potholes Tracking in Dual Split Sensor)
         const activePotholes = [];
-        if (window.threeSim && window.threeSim.potholes) {
+        // Potholes are simulator scenery — never projected while a physical
+        // camera (or the synthetic stream) is providing the sensor data.
+        if (window.threeSim && this.cameraSource === 'simulator' && window.threeSim.potholes) {
             window.threeSim.potholes.forEach(ph => {
                 const dx = ph.x - window.threeSim.ego.x;
                 const dz = ph.z - window.threeSim.ego.z;
@@ -2781,16 +2827,27 @@ function initHeroPreviewCanvas() {
         const centerY = h / 2 + 10;
         angle += 0.006;
 
-        // Draw 3 Concentric Ring Grids
+        // Draw 3 Concentric Ring Grids — dark halo + bold stroke so the rings
+        // stay clearly visible (they were too faint at 0.15–0.25 alpha).
         const rings = [50, 110, 170];
-        const ringColors = ['rgba(56, 189, 248, 0.25)', 'rgba(192, 132, 252, 0.2)', 'rgba(251, 146, 60, 0.15)'];
+        const ringColors = ['#38bdf8', '#c084fc', '#fb923c'];
+        const ringHalos = ['rgba(2, 6, 23, 0.85)', 'rgba(2, 6, 23, 0.85)', 'rgba(2, 6, 23, 0.85)'];
 
         rings.forEach((r, idx) => {
+            // Dark underlying halo carves a clean channel through the point cloud
+            ctx.beginPath();
+            ctx.ellipse(centerX, centerY, r * 1.6, r * 0.7, 0, 0, Math.PI * 2);
+            ctx.strokeStyle = ringHalos[idx];
+            ctx.lineWidth = 7;
+            ctx.setLineDash([]);
+            ctx.stroke();
+
+            // Bold visible ring stroke
             ctx.beginPath();
             ctx.ellipse(centerX, centerY, r * 1.6, r * 0.7, 0, 0, Math.PI * 2);
             ctx.strokeStyle = ringColors[idx];
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([10, 5]);
             ctx.stroke();
             ctx.setLineDash([]);
         });
