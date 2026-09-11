@@ -625,6 +625,7 @@ class UnifiedTeleopEngine {
         this._lastHudTick = 0;
         this._depthBannerVisible = false;
         this._depthBannerEl = null;
+        this._hatchPattern = null;
 
         // 2D Synthetic Benchmark Simulation State
         this.syntheticState = {
@@ -646,6 +647,26 @@ class UnifiedTeleopEngine {
         }
 
         this.init();
+    }
+
+    _initHatchPattern() {
+        if (this._hatchPattern || !this.camCtx) return;
+        try {
+            const pCanvas = document.createElement('canvas');
+            pCanvas.width = 16;
+            pCanvas.height = 16;
+            const pCtx = pCanvas.getContext('2d');
+            pCtx.strokeStyle = 'rgba(16, 185, 129, 0.32)';
+            pCtx.lineWidth = 1.5;
+            pCtx.beginPath();
+            pCtx.moveTo(0, 16); pCtx.lineTo(16, 0);
+            pCtx.moveTo(-8, 8); pCtx.lineTo(8, -8);
+            pCtx.moveTo(8, 24); pCtx.lineTo(24, 8);
+            pCtx.stroke();
+            this._hatchPattern = this.camCtx.createPattern(pCanvas, 'repeat');
+        } catch (e) {
+            this._hatchPattern = null;
+        }
     }
 
     init() {
@@ -1676,7 +1697,10 @@ class UnifiedTeleopEngine {
 
         // --- 3-Ring Foveated Zone Indicators (Near / Mid / Far) ---
         // Perspective mapping: near objects appear at the bottom of the ROI,
-           // Far ring zone (top 30% of ROI) - Crisp boundary line & badge without color-distorting fills
+        const roiTop = h * 0.35;
+        const roiH = h * 0.50;
+
+        // Far ring zone (top 30% of ROI) - Crisp boundary line & badge without color-distorting fills
         const farTop = roiTop;
         const farBot = roiTop + roiH * 0.30;
         ctx.strokeStyle = 'rgba(251, 146, 60, 0.40)';
@@ -1768,22 +1792,14 @@ class UnifiedTeleopEngine {
 
                 // Bounding Box & Semantic Masking
                 if (isTree) {
-                    // Full Semantic Vegetation Masking: Emerald green translucent mask with diagonal hatching
-                    ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
+                    // Full Semantic Vegetation Masking: Emerald green translucent mask with high-performance hatch pattern
+                    this._initHatchPattern();
+                    ctx.fillStyle = 'rgba(16, 185, 129, 0.18)';
                     ctx.fillRect(bx, by, bw, bh);
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.rect(bx, by, bw, bh);
-                    ctx.clip();
-                    ctx.strokeStyle = 'rgba(16, 185, 129, 0.32)';
-                    ctx.lineWidth = 1;
-                    for (let xh = bx - bh; xh < bx + bw; xh += 12) {
-                        ctx.beginPath();
-                        ctx.moveTo(xh, by);
-                        ctx.lineTo(xh + bh, by + bh);
-                        ctx.stroke();
+                    if (this._hatchPattern) {
+                        ctx.fillStyle = this._hatchPattern;
+                        ctx.fillRect(bx, by, bw, bh);
                     }
-                    ctx.restore();
                 } else {
                     ctx.fillStyle = fillColor;
                     ctx.fillRect(bx, by, bw, bh);
@@ -1802,7 +1818,7 @@ class UnifiedTeleopEngine {
                     ctx.beginPath();
                     ctx.moveTo(bx, by + cl); ctx.lineTo(bx, by); ctx.lineTo(bx + cl, by);
                     ctx.moveTo(bx + bw - cl, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cl);
-                    ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx + bh); ctx.lineTo(bx + cl, by + bh);
+                    ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cl, by + bh);
                     ctx.moveTo(bx + bw - cl, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cl);
                     ctx.stroke();
                 }
@@ -1819,7 +1835,7 @@ class UnifiedTeleopEngine {
                 }
 
                 ctx.font = 'bold 10px JetBrains Mono, monospace';
-                const tagW = ctx.measureText(tag).width + 12;
+                const tagW = Math.max(90, tag.length * 6.5 + 14);
                 const tagY = Math.max(h * 0.35 + 4, by - 22);
                 ctx.fillRect(bx, tagY, tagW, 18);
                 ctx.strokeStyle = strokeColor;
@@ -1835,7 +1851,7 @@ class UnifiedTeleopEngine {
                         rangePill = `2.5D ELEVATION DEFICIT: -12cm • ${dist.toFixed(1)}m`;
                     }
                     ctx.font = '10px JetBrains Mono, monospace';
-                    const pillW = ctx.measureText(rangePill).width + 12;
+                    const pillW = Math.max(80, rangePill.length * 6.4 + 14);
                     const pillY = Math.min(h * 0.85 - 20, by + bh + 4);
                     ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
                     ctx.fillRect(bx, pillY, pillW, 18);

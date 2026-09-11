@@ -2432,13 +2432,14 @@
             const fwdX = -Math.sin(this.ego.yaw);
             const fwdZ = -Math.cos(this.ego.yaw);
 
-            // Windshield Sensor Camera - mounted cleanly at front bumper/hood level looking forward
-            this.windshieldCam.position.set(
-                this.ego.x + fwdX * 1.95,
-                1.32,
-                this.ego.z + fwdZ * 1.95
-            );
-            this.windshieldCam.rotation.y = this.ego.yaw;
+            const eyeX = this.ego.x + fwdX * 1.95;
+            const eyeY = 1.35;
+            const eyeZ = this.ego.z + fwdZ * 1.95;
+
+            // Windshield Sensor Camera - mounted cleanly at front bumper/hood level looking forward with locked level horizon
+            this.windshieldCam.position.set(eyeX, eyeY, eyeZ);
+            this.windshieldCam.up.set(0, 1, 0);
+            this.windshieldCam.lookAt(eyeX + fwdX * 30.0, eyeY, eyeZ + fwdZ * 30.0);
 
             // User View Camera (Aspect-aware framing for Dual Split Screen vs Full Viewport)
             const aspect = this.width / Math.max(1, this.height);
@@ -2451,18 +2452,18 @@
                 const targetZ = this.ego.z - fwdZ * camDist;
 
                 this.userCamera.position.lerp(new THREE.Vector3(targetX, targetY, targetZ), 0.14);
+                this.userCamera.up.set(0, 1, 0);
                 this.userCamera.lookAt(this.ego.x, 1.2, this.ego.z);
-            } else if (this.cameraMode === 'cockpit') {
-                // Driver eye perspective looking forward with zero interior clipping
-                this.userCamera.position.set(
-                    this.ego.x + fwdX * 1.95,
-                    1.32,
-                    this.ego.z + fwdZ * 1.95
-                );
-                this.userCamera.rotation.y = this.ego.yaw;
+            } else if (this.cameraMode === 'cockpit' || this.cameraMode === 'front') {
+                // Front View / Cockpit: Driver perspective looking straight ahead down the road
+                // Locked level horizon (up = 0, 1, 0) with zero gimbal lock, zero roll tilting, zero tumble!
+                this.userCamera.position.set(eyeX, eyeY, eyeZ);
+                this.userCamera.up.set(0, 1, 0);
+                this.userCamera.lookAt(eyeX + fwdX * 30.0, eyeY, eyeZ + fwdZ * 30.0);
             } else if (this.cameraMode === 'overhead') {
                 const camH = isNarrowSplit ? 52 : 38;
                 this.userCamera.position.set(this.ego.x, camH, this.ego.z + (isNarrowSplit ? 24 : 18));
+                this.userCamera.up.set(0, 1, 0);
                 this.userCamera.lookAt(this.ego.x, 0, this.ego.z);
             }
         }
@@ -2502,7 +2503,17 @@
             }
 
             const camEl = document.getElementById('sim-cam-btn-text');
-            if (camEl) camEl.innerText = `CAM: ${this.cameraMode.toUpperCase()}`;
+            if (camEl) {
+                if (this.cameraMode === 'cockpit' || this.cameraMode === 'front') {
+                    camEl.innerText = 'CAM: FRONT VIEW';
+                } else if (this.cameraMode === 'chase') {
+                    camEl.innerText = 'CAM: CHASE';
+                } else if (this.cameraMode === 'overhead') {
+                    camEl.innerText = 'CAM: OVERHEAD';
+                } else {
+                    camEl.innerText = `CAM: ${this.cameraMode.toUpperCase()}`;
+                }
+            }
         }
 
         // ---------------------------------------------------------------------
@@ -2530,6 +2541,11 @@
         }
 
         getDetectedObjects() {
+            // Frame-level caching: Return existing calculation if called multiple times in the same simulation tick
+            if (this._lastDetectedSimFrame === this.simFrame && this._cachedDetected) {
+                return this._cachedDetected;
+            }
+
             const results = [];
             const actors = [
                 ...this.pedestrians.map(p => ({ x: p.x, y: 0.95, z: p.z, label: p.label })),
@@ -2537,20 +2553,27 @@
                 ...this.potholes.map(ph => ({ x: ph.x, y: 0.05, z: ph.z, label: 'pothole', depth: ph.depth }))
             ];
 
-            const egoPos = new THREE.Vector3(this.ego.x, 0, this.ego.z);
-            const egoFwd = new THREE.Vector3(-Math.sin(this.ego.yaw), 0, -Math.cos(this.ego.yaw));
+            const egoX = this.ego.x;
+            const egoZ = this.ego.z;
+            const egoFwdX = -Math.sin(this.ego.yaw);
+            const egoFwdZ = -Math.cos(this.ego.yaw);
+
+            // Reusable vector for zero-allocation fast projection
+            if (!this._tempProjVec) this._tempProjVec = new THREE.Vector3();
 
             actors.forEach(act => {
-                const actPos = new THREE.Vector3(act.x, act.y, act.z);
-                const rel = new THREE.Vector3().subVectors(actPos, egoPos);
-                const dist = rel.length();
+                const dx = act.x - egoX;
+                const dz = act.z - egoZ;
+                const distSq = dx * dx + dz * dz;
 
-                if (dist > 85) return;
+                if (distSq > 7225) return; // > 85m
+                const dist = Math.sqrt(distSq);
 
-                const dot = rel.dot(egoFwd);
+                const dot = dx * egoFwdX + dz * egoFwdZ;
                 if (dot <= 0.25) return; // behind vehicle
 
-                const pProj = actPos.clone().project(this.windshieldCam);
+                this._tempProjVec.set(act.x, act.y, act.z).project(this.windshieldCam);
+                const pProj = this._tempProjVec;
                 if (pProj.z < 0 || pProj.z > 1) return;
                 if (pProj.x < -1.15 || pProj.x > 1.15 || pProj.y < -1.15 || pProj.y > 1.15) return;
 
@@ -2601,24 +2624,46 @@
                 });
             });
 
-            // Track ALL roadside trees and vegetation ahead in windshield camera frustum
+            // Track roadside trees & vegetation ahead in windshield camera frustum
+            // Efficient batch filtering: zero garbage allocations & limit to closest 10 prominent trees
             if (this.trees && this.trees.length) {
-                this.trees.forEach(tree => {
-                    const treePos = tree.pos;
-                    if (!treePos) return;
-                    const rel = new THREE.Vector3().subVectors(treePos, egoPos);
-                    const dist = rel.length();
-                    if (dist < 3.0 || dist > 85.0) return;
-                    const dot = rel.dot(egoFwd);
-                    if (dot <= 0.25) return; // In front of vehicle
+                const treeCandidates = [];
+                for (let i = 0; i < this.trees.length; i++) {
+                    const tree = this.trees[i];
+                    const tPos = tree.pos;
+                    if (!tPos) continue;
 
-                    const pProj = treePos.clone().project(this.windshieldCam);
-                    if (pProj.z < 0 || pProj.z > 1) return;
-                    if (pProj.x < -1.15 || pProj.x > 1.15 || pProj.y < -1.15 || pProj.y > 1.15) return;
+                    const dx = tPos.x - egoX;
+                    const dz = tPos.z - egoZ;
+                    const distSq = dx * dx + dz * dz;
+                    if (distSq < 9 || distSq > 4900) continue; // 3m to 70m
 
-                    const screenX = (pProj.x + 1) / 2;
-                    const screenY = (-pProj.y + 1) / 2;
+                    const dot = dx * egoFwdX + dz * egoFwdZ;
+                    if (dot <= 0.3) continue; // In front only
 
+                    this._tempProjVec.set(tPos.x, tPos.y, tPos.z).project(this.windshieldCam);
+                    const pz = this._tempProjVec.z;
+                    const px = this._tempProjVec.x;
+                    const py = this._tempProjVec.y;
+
+                    if (pz < 0 || pz > 1) continue;
+                    if (px < -1.15 || px > 1.15 || py < -1.15 || py > 1.15) continue;
+
+                    const dist = Math.sqrt(distSq);
+                    treeCandidates.push({
+                        dist,
+                        screenX: (px + 1) / 2,
+                        screenY: (-py + 1) / 2
+                    });
+                }
+
+                // Sort and select the closest prominent roadside trees/hedges in view
+                treeCandidates.sort((a, b) => a.dist - b.dist);
+                const maxTrees = Math.min(treeCandidates.length, 10);
+
+                for (let i = 0; i < maxTrees; i++) {
+                    const tc = treeCandidates[i];
+                    const dist = tc.dist;
                     const boxW = THREE.MathUtils.clamp(180 / Math.max(1, dist), 20, 110);
                     const boxH = THREE.MathUtils.clamp(230 / Math.max(1, dist), 28, 140);
 
@@ -2627,21 +2672,23 @@
                         dist: dist,
                         ringId: dist <= 10 ? 0 : (dist <= 30 ? 1 : 2),
                         resolution: dist <= 10 ? '5cm' : (dist <= 30 ? '15cm' : '50cm'),
-                        bearing01: screenX,
+                        bearing01: tc.screenX,
                         rangeBand: dist <= 10 ? 'near' : (dist <= 30 ? 'mid' : 'far'),
                         confidence: 0.98,
                         masked: true,
                         maskType: 'Static Scene / Vegetation Caching',
                         box: {
-                            x: screenX,
-                            y: screenY,
+                            x: tc.screenX,
+                            y: tc.screenY,
                             w: boxW,
                             h: boxH
                         }
                     });
-                });
+                }
             }
 
+            this._lastDetectedSimFrame = this.simFrame;
+            this._cachedDetected = results;
             return results;
         }
 
@@ -2667,7 +2714,7 @@
         }
 
         render() {
-            const isCockpit = this.cameraMode === 'cockpit';
+            const isCockpit = this.cameraMode === 'cockpit' || this.cameraMode === 'front';
             if (isCockpit && this.ego.mesh) this.ego.mesh.visible = false;
 
             this.renderer.setRenderTarget(null);

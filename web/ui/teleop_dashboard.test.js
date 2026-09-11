@@ -15,7 +15,8 @@ function createAnalyzer() {
             })
         }
     };
-    const source = fs.readFileSync('teleop_dashboard.js', 'utf8');
+    const path = require('node:path');
+    const source = fs.readFileSync(path.join(__dirname, 'teleop_dashboard.js'), 'utf8');
     const analyzerSource = source.slice(0, source.indexOf('class UnifiedTeleopEngine'));
     vm.runInNewContext(`${analyzerSource}; globalThis.Analyzer = RealtimeMotionAnalyzer;`, context);
 
