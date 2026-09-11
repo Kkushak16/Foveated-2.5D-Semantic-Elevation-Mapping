@@ -73,13 +73,21 @@
 
             // --- Ego Vehicle State ---
             this.ego = {
-                x: -34,
+                x: -37.5,            // Centered in West driving lane (road: -41m to -27m)
                 z: 40,
                 y: 0,
                 yaw: 0,              // facing North (towards -Z)
                 speed: 0,
+                lastSpeed: 0,
+                lastYaw: 0,
+                roll: 0,
+                rollVel: 0,
+                pitch: 0,
+                pitchVel: 0,
+                suspensionY: 0,
+                totalDist: 0,
                 cruiseSpeed: 9.6,    // ~35 km/h cruising speed
-                turnSpeed: 5.8,      // ~21 km/h cornering speed
+                turnSpeed: 6.2,      // ~22 km/h cornering speed
                 accel: 7.5,
                 decel: 10.0,
                 friction: 2.6,
@@ -134,16 +142,16 @@
         // ---------------------------------------------------------------------
         _generateCircuitWaypoints() {
             const waypoints = [];
-            const R = 34;
+            const R = 37.5; // Exactly centered in the right driving lane (road: 27m to 41m)
             const straightHalf = 75;
 
             // 1. West Straight (Driving North from Z = +75 to Z = -75 along X = -R)
-            for (let z = straightHalf; z >= -straightHalf; z -= 5) {
+            for (let z = straightHalf; z >= -straightHalf; z -= 3.0) {
                 waypoints.push({ x: -R, z: z });
             }
 
-            // 2. North Curve (Sweeping right from X = -R to X = +R around center (0, -straightHalf))
-            const curveSteps = 24;
+            // 2. North Curve (Sweeping 180° around center (0, -straightHalf) from X = -R to X = +R)
+            const curveSteps = 36;
             for (let i = 1; i < curveSteps; i++) {
                 const theta = (i / curveSteps) * Math.PI;
                 waypoints.push({
@@ -153,11 +161,11 @@
             }
 
             // 3. East Straight (Driving South from Z = -75 to Z = +75 along X = +R)
-            for (let z = -straightHalf; z <= straightHalf; z += 5) {
+            for (let z = -straightHalf; z <= straightHalf; z += 3.0) {
                 waypoints.push({ x: R, z: z });
             }
 
-            // 4. South Curve (Sweeping right from X = +R to X = -R around center (0, straightHalf))
+            // 4. South Curve (Sweeping 180° around center (0, +straightHalf) from X = +R to X = -R)
             for (let i = 1; i < curveSteps; i++) {
                 const theta = (i / curveSteps) * Math.PI;
                 waypoints.push({
@@ -186,6 +194,56 @@
                 }
             }
             return bestIdx;
+        }
+
+        _getCircuitPose(progress, R = 37.5, reversed = false) {
+            const straightHalf = 75;
+            const straightLen = straightHalf * 2; // 150m
+            const curveLen = Math.PI * R;
+            const totalLen = straightLen * 2 + curveLen * 2;
+
+            let s = ((progress % totalLen) + totalLen) % totalLen;
+            if (reversed) {
+                s = (totalLen - s) % totalLen;
+            }
+
+            let x = 0, z = 0, yaw = 0;
+
+            if (s < straightLen) {
+                // 1. West Straight (Driving North: Z = +75 down to -75 along X = -R)
+                const u = s;
+                x = -R;
+                z = straightHalf - u;
+                yaw = 0;
+            } else if (s < straightLen + curveLen) {
+                // 2. North Curve (Sweeping 180° around (0, -75) from X = -R to X = +R)
+                const u = s - straightLen;
+                const theta = (u / curveLen) * Math.PI; // 0 to PI
+                x = -R * Math.cos(theta);
+                z = -straightHalf - R * Math.sin(theta);
+                yaw = -theta;
+            } else if (s < straightLen * 2 + curveLen) {
+                // 3. East Straight (Driving South: Z = -75 up to +75 along X = +R)
+                const u = s - (straightLen + curveLen);
+                x = R;
+                z = -straightHalf + u;
+                yaw = Math.PI;
+            } else {
+                // 4. South Curve (Sweeping 180° around (0, +75) from X = +R to X = -R)
+                const u = s - (straightLen * 2 + curveLen);
+                const theta = (u / curveLen) * Math.PI; // 0 to PI
+                x = R * Math.cos(theta);
+                z = straightHalf + R * Math.sin(theta);
+                yaw = Math.PI - theta;
+            }
+
+            if (reversed) {
+                yaw += Math.PI;
+                while (yaw > Math.PI) yaw -= Math.PI * 2;
+                while (yaw < -Math.PI) yaw += Math.PI * 2;
+            }
+
+            return { x, z, yaw, totalLen };
         }
 
         // ---------------------------------------------------------------------
@@ -396,13 +454,9 @@
                 });
             }
 
-            // High-Visibility Zebra Crosswalks
-            this._buildZebraCrosswalk(trackGroup, -R, -40, roadWidth, 4.8);
-            this._buildZebraCrosswalk(trackGroup, -R, -10, roadWidth, 4.8);
-            this._buildZebraCrosswalk(trackGroup, -R, 30, roadWidth, 4.8);
-            this._buildZebraCrosswalk(trackGroup, R, -35, roadWidth, 4.8);
-            this._buildZebraCrosswalk(trackGroup, R, 15, roadWidth, 4.8);
-            this._buildZebraCrosswalk(trackGroup, R, 50, roadWidth, 4.8);
+            // Dedicated High-Visibility Zebra Crosswalks (Controlled Pedestrian Crossing Zones)
+            this._buildZebraCrosswalk(trackGroup, -R, -20, roadWidth, 5.2);
+            this._buildZebraCrosswalk(trackGroup, R, 20, roadWidth, 5.2);
 
             // Sidewalks & Curbs
             this._buildCurbsAndSidewalks(trackGroup, R, roadWidth, straightHalf);
@@ -1081,6 +1135,7 @@
             this.ego.lidarSweep = sweepMesh;
 
             car.position.set(this.ego.x, 0, this.ego.z);
+            car.rotation.order = 'YXZ';
             car.rotation.y = this.ego.yaw;
 
             this.scene.add(car);
@@ -1249,30 +1304,30 @@
             this.pedestrians = [];
 
             const pedConfigs = [
-                // Pedestrian 1: Crossing West Zebra #1 (Z = -40)
-                { startX: -41.0, startZ: -40, targetX: -27.0, targetZ: -40, speed: 1.35, jacketColor: 0x0284c7, pantsColor: 0x1e293b, capColor: 0x0f172a, label: 'person', bag: true },
-                // Pedestrian 2: Crossing West Zebra #2 (Z = -10) - direct approach!
-                { startX: -27.0, startZ: -10, targetX: -41.0, targetZ: -10, speed: 1.40, jacketColor: 0xf43f5e, pantsColor: 0x334155, capColor: 0x991b1b, label: 'person', bag: false },
-                // Pedestrian 3: Crossing West Zebra #3 (Z = 30)
-                { startX: -41.0, startZ: 30, targetX: -27.0, targetZ: 30, speed: 1.30, jacketColor: 0xf59e0b, pantsColor: 0x0f172a, capColor: 0x78350f, label: 'person', bag: true },
-                // Pedestrian 4: Crossing East Zebra #1 (Z = -35)
-                { startX: 27.0, startZ: -35, targetX: 41.0, targetZ: -35, speed: 1.30, jacketColor: 0x10b981, pantsColor: 0x1e293b, capColor: 0x064e3b, label: 'person', bag: false },
-                // Pedestrian 5: Crossing East Zebra #2 (Z = 15)
-                { startX: 41.0, startZ: 15, targetX: 27.0, targetZ: 15, speed: 1.45, jacketColor: 0xa855f7, pantsColor: 0x334155, capColor: 0x581c87, label: 'person', bag: true },
-                // Pedestrian 6: Crossing East Zebra #3 (Z = 50)
-                { startX: 27.0, startZ: 50, targetX: 41.0, targetZ: 50, speed: 1.25, jacketColor: 0x06b6d4, pantsColor: 0x1e293b, capColor: 0x0e7490, label: 'person', bag: false },
-                // Pedestrian 7: Walking along North sidewalk curve (Z = -100)
-                { startX: -22, startZ: -104, targetX: 22, targetZ: -104, speed: 1.15, jacketColor: 0xeab308, pantsColor: 0x1e293b, capColor: 0x713f12, label: 'person', bag: true },
-                // Pedestrian 8: Walking along South sidewalk curve (Z = 100)
-                { startX: 22, startZ: 104, targetX: -22, targetZ: 104, speed: 1.20, jacketColor: 0xec4899, pantsColor: 0x0f172a, capColor: 0x831843, label: 'person', bag: false },
-                // Pedestrian 9: Jogging in Central Park West path
-                { startX: -7, startZ: -45, targetX: -7, targetZ: 45, speed: 2.10, jacketColor: 0x3b82f6, pantsColor: 0x0f172a, capColor: 0x1d4ed8, label: 'person', bag: false },
-                // Pedestrian 10: Jogging in Central Park East path
-                { startX: 7, startZ: 42, targetX: 7, targetZ: -42, speed: 1.95, jacketColor: 0x10b981, pantsColor: 0x334155, capColor: 0x047857, label: 'person', bag: false },
-                // Pedestrian 11: Stroller near Central Park fountain
-                { startX: -12, startZ: 30, targetX: 12, targetZ: 30, speed: 0.95, jacketColor: 0xf97316, pantsColor: 0x1e293b, capColor: 0xc2410c, label: 'person', bag: true },
-                // Pedestrian 12: Sidewalk pedestrian along West curb
-                { startX: -42.5, startZ: 10, targetX: -42.5, targetZ: -10, speed: 1.05, jacketColor: 0x8b5cf6, pantsColor: 0x334155, capColor: 0x6d28d9, label: 'person', bag: false }
+                // 1. Sidewalk West Pedestrian (strolling along West sidewalk curb)
+                { startX: -43.5, startZ: 40, targetX: -43.5, targetZ: -40, speed: 1.25, jacketColor: 0x0284c7, pantsColor: 0x1e293b, capColor: 0x0f172a, label: 'person', bag: true },
+                // 2. Sidewalk West Pedestrian (strolling along West outer promenade)
+                { startX: -43.0, startZ: -50, targetX: -43.0, targetZ: 30, speed: 1.35, jacketColor: 0xf43f5e, pantsColor: 0x334155, capColor: 0x991b1b, label: 'person', bag: false },
+                // 3. Sidewalk East Pedestrian (strolling along East sidewalk curb)
+                { startX: 43.5, startZ: 45, targetX: 43.5, targetZ: -35, speed: 1.20, jacketColor: 0xf59e0b, pantsColor: 0x0f172a, capColor: 0x78350f, label: 'person', bag: true },
+                // 4. Sidewalk East Pedestrian (strolling along East promenade)
+                { startX: 43.0, startZ: -45, targetX: 43.0, targetZ: 45, speed: 1.30, jacketColor: 0x10b981, pantsColor: 0x1e293b, capColor: 0x064e3b, label: 'person', bag: false },
+                // 5. North Promenade Arc Pedestrian (strolling along curved outer plaza)
+                { startX: -35, startZ: -102, targetX: 35, targetZ: -102, speed: 1.15, jacketColor: 0xa855f7, pantsColor: 0x334155, capColor: 0x581c87, label: 'person', bag: true },
+                // 6. South Promenade Arc Pedestrian (strolling along curved outer plaza)
+                { startX: 35, startZ: 102, targetX: -35, targetZ: 102, speed: 1.18, jacketColor: 0x06b6d4, pantsColor: 0x1e293b, capColor: 0x0e7490, label: 'person', bag: false },
+                // 7. Central Park West Trail Jogger
+                { startX: -8, startZ: -50, targetX: -8, targetZ: 50, speed: 2.20, jacketColor: 0x3b82f6, pantsColor: 0x0f172a, capColor: 0x1d4ed8, label: 'person', bag: false },
+                // 8. Central Park East Trail Jogger
+                { startX: 8, startZ: 50, targetX: 8, targetZ: -50, speed: 2.10, jacketColor: 0x10b981, pantsColor: 0x334155, capColor: 0x047857, label: 'person', bag: false },
+                // 9. Central Park Fountain Plaza Pedestrian
+                { startX: -12, startZ: 15, targetX: 12, targetZ: 15, speed: 1.05, jacketColor: 0xf97316, pantsColor: 0x1e293b, capColor: 0xc2410c, label: 'person', bag: true },
+                // 10. Central Park South Promenade Pedestrian
+                { startX: -10, startZ: -25, targetX: 10, targetZ: -25, speed: 1.10, jacketColor: 0xec4899, pantsColor: 0x0f172a, capColor: 0x831843, label: 'person', bag: false },
+                // 11. Dedicated West Zebra Crosswalk Pedestrian (Crossing at Z = -20)
+                { startX: -43.0, startZ: -20, targetX: -27.5, targetZ: -20, speed: 1.35, jacketColor: 0xeab308, pantsColor: 0x1e293b, capColor: 0x713f12, label: 'person', bag: true },
+                // 12. Dedicated East Zebra Crosswalk Pedestrian (Crossing at Z = 20)
+                { startX: 43.0, startZ: 20, targetX: 27.5, targetZ: 20, speed: 1.30, jacketColor: 0x8b5cf6, pantsColor: 0x334155, capColor: 0x6d28d9, label: 'person', bag: false }
             ];
 
             pedConfigs.forEach(cfg => {
@@ -1634,34 +1689,52 @@
             };
 
             const vehicleConfigs = [
-                // 1. Moving Silver Metallic Sedan on West Lane (Moving North)
-                { x: -31.5, z: 45, speed: 7.2, dir: -1, yaw: 0, color: 0x94a3b8, type: 'sedan', label: 'vehicle' },
-                // 2. Moving Deep Navy Blue Compact SUV on East Lane (Moving South)
-                { x: 31.5, z: -35, speed: 6.8, dir: 1, yaw: Math.PI, color: 0x1e3a8a, type: 'suv', label: 'vehicle' },
-                // 3. Parked Red Sedan on East outer curb
-                { x: 39.5, z: -15, speed: 0, dir: 0, yaw: 0, color: 0xb91c1c, type: 'sedan', label: 'vehicle' },
-                // 4. Parked Pearl White SUV on West outer curb
-                { x: -39.5, z: 22, speed: 0, dir: 0, yaw: Math.PI, color: 0xf8fafc, type: 'suv', label: 'vehicle' },
-                // 5. Parked Commercial Delivery Van on East outer curb
-                { x: 39.5, z: 60, speed: 0, dir: 0, yaw: 0, color: 0x0284c7, type: 'van', label: 'vehicle' },
-                // 6. Parked Emerald Green Crossover on West outer curb
-                { x: -39.5, z: -55, speed: 0, dir: 0, yaw: Math.PI, color: 0x047857, type: 'suv', label: 'vehicle' }
+                // 1. Moving Silver Metallic Sedan on Inner Circuit Lane
+                { speed: 7.5, progress: 45, radius: 31.5, reversed: false, color: 0x94a3b8, type: 'sedan', label: 'vehicle' },
+                // 2. Moving Deep Navy Blue Compact SUV on Outer Circuit Lane
+                { speed: 6.8, progress: 260, radius: 37.5, reversed: false, color: 0x1e3a8a, type: 'suv', label: 'vehicle' },
+                // 3. Moving Emerald Green Crossover in Counter-Flow Inner Lane
+                { speed: 7.2, progress: 140, radius: 31.5, reversed: true, color: 0x047857, type: 'suv', label: 'vehicle' },
+                // 4. Moving Pearl White Executive Sedan on Outer Circuit Lane
+                { speed: 8.2, progress: 430, radius: 37.5, reversed: false, color: 0xf8fafc, type: 'sedan', label: 'vehicle' },
+                // 5. Parked Red Sedan on East outer shoulder
+                { x: 40.0, z: -15, speed: 0, yaw: Math.PI, color: 0xb91c1c, type: 'sedan', label: 'vehicle' },
+                // 6. Parked Commercial Delivery Van on East outer shoulder
+                { x: 40.0, z: 55, speed: 0, yaw: Math.PI, color: 0x0284c7, type: 'van', label: 'vehicle' },
+                // 7. Parked White SUV on West outer shoulder
+                { x: -40.0, z: 20, speed: 0, yaw: 0, color: 0xe2e8f0, type: 'suv', label: 'vehicle' }
             ];
 
             vehicleConfigs.forEach(cfg => {
+                let initX = cfg.x || 0;
+                let initZ = cfg.z || 0;
+                let initYaw = cfg.yaw || 0;
+                let totalLen = 500;
+
+                if (cfg.speed > 0) {
+                    const pose = this._getCircuitPose(cfg.progress || 0, cfg.radius || 37.5, cfg.reversed || false);
+                    initX = pose.x;
+                    initZ = pose.z;
+                    initYaw = pose.yaw;
+                    totalLen = pose.totalLen;
+                }
+
                 const { mesh, wheels } = createCarMesh(cfg);
-                mesh.position.set(cfg.x, 0, cfg.z);
-                mesh.rotation.y = cfg.yaw;
+                mesh.position.set(initX, 0, initZ);
+                mesh.rotation.y = initYaw;
                 this.scene.add(mesh);
 
                 this.trafficVehicles.push({
                     mesh,
                     wheels,
-                    x: cfg.x,
-                    z: cfg.z,
+                    x: initX,
+                    z: initZ,
+                    yaw: initYaw,
                     speed: cfg.speed,
-                    dir: cfg.dir,
-                    yaw: cfg.yaw,
+                    progress: cfg.progress || 0,
+                    radius: cfg.radius || 37.5,
+                    reversed: cfg.reversed || false,
+                    totalLen: totalLen,
                     type: cfg.type,
                     label: cfg.label
                 });
@@ -1767,19 +1840,49 @@
             // Hard collision physics: prevents penetrating pedestrians, parked cars, or guardrails!
             this._resolveCollisions(dt);
 
-            // Apply vehicle transform with realistic suspension dynamics (pitch & body roll)
+            // ── COMPREHENSIVE 2ND-ORDER SUSPENSION & BODY ROLL PHYSICS ──
             const speedDelta = (this.ego.speed - (this.ego.lastSpeed || 0)) / dt;
             this.ego.lastSpeed = this.ego.speed;
 
-            // Longitudinal pitch (dives under braking, squats under acceleration)
-            const targetPitch = THREE.MathUtils.clamp(-speedDelta * 0.006, -0.045, 0.035);
-            this.ego.pitch = THREE.MathUtils.lerp(this.ego.pitch || 0, targetPitch, Math.min(1.0, dt * 9.0));
+            // Heading rate of change (yaw velocity)
+            let yawDelta = this.ego.yaw - (this.ego.lastYaw !== undefined ? this.ego.lastYaw : this.ego.yaw);
+            while (yawDelta > Math.PI) yawDelta -= Math.PI * 2;
+            while (yawDelta < -Math.PI) yawDelta += Math.PI * 2;
+            const yawRate = yawDelta / Math.max(0.001, dt);
+            this.ego.lastYaw = this.ego.yaw;
 
-            // Lateral body roll (rolls into/against turns proportional to speed & steering angle)
-            const targetRoll = THREE.MathUtils.clamp(this.ego.steerAngle * (this.ego.speed * 0.012), -0.05, 0.05);
-            this.ego.roll = THREE.MathUtils.lerp(this.ego.roll || 0, targetRoll, Math.min(1.0, dt * 8.0));
+            this.ego.totalDist = (this.ego.totalDist || 0) + Math.abs(this.ego.speed) * dt;
 
-            this.ego.mesh.position.set(this.ego.x, 0, this.ego.z);
+            // 1. Lateral Centrifugal Body Roll (outward chassis roll into turns)
+            const latAccel = this.ego.speed * yawRate;
+            const targetRoll = THREE.MathUtils.clamp(
+                -latAccel * 0.038 - this.ego.steerAngle * (Math.abs(this.ego.speed) * 0.015),
+                -0.14,
+                0.14
+            );
+            // 2nd-order spring-damper for body roll (natural frequency ~10 rad/s, damped settling)
+            const kRoll = 92.0;
+            const cRoll = 13.5;
+            const rollAccel = -kRoll * ((this.ego.roll || 0) - targetRoll) - cRoll * (this.ego.rollVel || 0);
+            this.ego.rollVel = (this.ego.rollVel || 0) + rollAccel * dt;
+            this.ego.roll = THREE.MathUtils.clamp((this.ego.roll || 0) + this.ego.rollVel * dt, -0.16, 0.16);
+
+            // 2. Longitudinal Pitch Dynamics (dive under braking, squat under acceleration)
+            const targetPitch = THREE.MathUtils.clamp(-speedDelta * 0.012, -0.09, 0.06);
+            const kPitch = 115.0;
+            const cPitch = 15.0;
+            const pitchAccel = -kPitch * ((this.ego.pitch || 0) - targetPitch) - cPitch * (this.ego.pitchVel || 0);
+            this.ego.pitchVel = (this.ego.pitchVel || 0) + pitchAccel * dt;
+            this.ego.pitch = THREE.MathUtils.clamp((this.ego.pitch || 0) + this.ego.pitchVel * dt, -0.11, 0.08);
+
+            // 3. Road Compliance & Micro-Vibration
+            const roadVibration = Math.sin(this.ego.totalDist * 8.5) * 0.008 * Math.min(1.0, Math.abs(this.ego.speed) / 4.0);
+            const targetSuspY = Math.abs(this.ego.pitch) * -0.03 + roadVibration;
+            this.ego.suspensionY = THREE.MathUtils.lerp(this.ego.suspensionY || 0, targetSuspY, Math.min(1.0, dt * 14.0));
+
+            // Apply chassis position & orientation
+            this.ego.mesh.rotation.order = 'YXZ';
+            this.ego.mesh.position.set(this.ego.x, this.ego.suspensionY, this.ego.z);
             this.ego.mesh.rotation.y = this.ego.yaw;
             this.ego.mesh.rotation.x = this.ego.pitch;
             this.ego.mesh.rotation.z = this.ego.roll;
@@ -1798,13 +1901,15 @@
                 }
             }
 
-            // Animate wheels & steering angle
+            // Animate wheels, steering angle & dynamic suspension camber
             this.ego.wheelRotation += (this.ego.speed * dt) / 0.36;
             this.ego.wheels.forEach(w => {
                 w.group.children[0].rotation.x = this.ego.wheelRotation;
                 if (w.isFront) {
                     // Non-mirrored steering of front wheels
                     w.group.rotation.y = -this.ego.steerAngle;
+                    // Dynamic front wheel camber leaning into turn
+                    w.group.rotation.z = -this.ego.steerAngle * 0.12;
                 }
             });
 
@@ -1849,34 +1954,30 @@
 
             // Vehicle collision disks along centerline: front bumper, center chassis, rear bumper
             const carDisks = [
-                { x: this.ego.x + fwdX * 1.6, z: this.ego.z + fwdZ * 1.6, r: 1.15 },
-                { x: this.ego.x, z: this.ego.z, r: 1.15 },
-                { x: this.ego.x - fwdX * 1.6, z: this.ego.z - fwdZ * 1.6, r: 1.15 }
+                { x: this.ego.x + fwdX * 1.5, z: this.ego.z + fwdZ * 1.5, r: 0.95 },
+                { x: this.ego.x, z: this.ego.z, r: 0.95 },
+                { x: this.ego.x - fwdX * 1.5, z: this.ego.z - fwdZ * 1.5, r: 0.95 }
             ];
 
             // 1. Collision with Pedestrians: REALISTIC NEWTONIAN MOMENTUM & AEB ARREST
-            // Mass ratio: Car ~1500kg vs Human ~75kg.
-            // The car NEVER bounces backwards! The human receives the impact impulse,
-            // deflects outward/forward, and enters a dynamic stumble/knockback state.
             this.pedestrians.forEach(ped => {
                 carDisks.forEach(disk => {
                     const dx = ped.x - disk.x;
                     const dz = ped.z - disk.z;
                     const dist = Math.hypot(dx, dz);
-                    const minDist = disk.r + 0.65; // 1.80m physical envelope
+                    const minDist = disk.r + 0.45; // ~1.40m physical envelope
 
                     if (dist < minDist && dist > 0.001) {
                         this.collisionAlert = true;
                         const overlap = minDist - dist;
-                        const nx = dx / dist; // Vector pointing outward from car towards pedestrian
+                        const nx = dx / dist;
                         const nz = dz / dist;
 
-                        // Push pedestrian outward out of car bounding box (car is NOT pushed backwards!)
+                        // Push pedestrian outward (car is NOT pushed backwards!)
                         ped.x += nx * overlap;
                         ped.z += nz * overlap;
 
-                        // Forward speed arrest: car loses momentum to impact and AEB emergency braking,
-                        // but strictly CANNOT go into negative (reverse) speed!
+                        // Forward speed arrest: car loses momentum to impact and AEB emergency braking
                         if (this.ego.speed > 0) {
                             this.ego.speed = Math.max(0, this.ego.speed - (this.ego.speed * 0.40 + 3.0 * dt));
                         } else if (this.ego.speed < 0) {
@@ -1892,111 +1993,161 @@
                 });
             });
 
-            // 2. Collision with Traffic Vehicles (Realistic Stop & Separation)
+            // 2. Collision with Traffic Vehicles (Realistic Capsule / Dual-Disk Separation)
+            // Eliminates the oversized 3.8m circular bubble that previously created an invisible wall!
             this.trafficVehicles.forEach(tv => {
-                const dx = this.ego.x - tv.x;
-                const dz = this.ego.z - tv.z;
-                const dist = Math.hypot(dx, dz);
-                const minDist = 3.8;
-                if (dist < minDist && dist > 0.001) {
-                    this.collisionAlert = true;
-                    const overlap = minDist - dist;
-                    const nx = dx / dist;
-                    const nz = dz / dist;
-                    this.ego.x += nx * overlap * 0.6;
-                    this.ego.z += nz * overlap * 0.6;
-                    // Stop car cleanly upon vehicle impact — never throw into reverse!
-                    this.ego.speed = Math.max(0, this.ego.speed * 0.2 - 0.2);
-                }
+                const tvFwdX = -Math.sin(tv.yaw || 0);
+                const tvFwdZ = -Math.cos(tv.yaw || 0);
+                const tvDisks = [
+                    { x: tv.x + tvFwdX * 1.35, z: tv.z + tvFwdZ * 1.35, r: 0.95 },
+                    { x: tv.x - tvFwdX * 1.35, z: tv.z - tvFwdZ * 1.35, r: 0.95 }
+                ];
+
+                carDisks.forEach(egoDisk => {
+                    tvDisks.forEach(tvDisk => {
+                        const dx = egoDisk.x - tvDisk.x;
+                        const dz = egoDisk.z - tvDisk.z;
+                        const dist = Math.hypot(dx, dz);
+                        const minDist = egoDisk.r + tvDisk.r; // ~1.90m true physical vehicle width
+
+                        if (dist < minDist && dist > 0.001) {
+                            this.collisionAlert = true;
+                            const overlap = minDist - dist;
+                            const nx = dx / dist;
+                            const nz = dz / dist;
+                            this.ego.x += nx * overlap * 0.65;
+                            this.ego.z += nz * overlap * 0.65;
+                            // Stop car cleanly upon vehicle impact — never reverse!
+                            this.ego.speed = Math.max(0, this.ego.speed * 0.2 - 0.2);
+                        }
+                    });
+                });
             });
 
-            // 3. Collision with Highway Guardrails (|X| > 39.0)
-            const maxTrackX = 39.0;
-            if (Math.abs(this.ego.x) > maxTrackX) {
-                this.collisionAlert = true;
-                this.ego.x = Math.sign(this.ego.x) * maxTrackX;
-                this.ego.yaw = this.ego.x < 0 ? 0.0 : Math.PI;
-                this.ego.steerAngle = 0;
-                this.ego.speed = Math.max(0, this.ego.speed * 0.75);
+            // 3. Outer Track Safety Boundary (Soft containment, NO arbitrary yaw snapping!)
+            const straightHalf = 75;
+            if (Math.abs(this.ego.z) <= straightHalf) {
+                // Straights: Outer road curb is at |X| = 42.0. Soft containment barrier at 43.5m
+                const maxStraightX = 43.5;
+                if (Math.abs(this.ego.x) > maxStraightX) {
+                    this.collisionAlert = true;
+                    this.ego.x = Math.sign(this.ego.x) * maxStraightX;
+                    this.ego.speed = Math.max(0, this.ego.speed * 0.85);
+                }
+            } else {
+                // Curves: Sweeping outer radius centered at (0, ±75)
+                const centerZ = this.ego.z > 0 ? straightHalf : -straightHalf;
+                const rCurve = Math.hypot(this.ego.x, this.ego.z - centerZ);
+                const maxCurveR = 44.5;
+                if (rCurve > maxCurveR) {
+                    this.collisionAlert = true;
+                    const scale = maxCurveR / rCurve;
+                    this.ego.x *= scale;
+                    this.ego.z = centerZ + (this.ego.z - centerZ) * scale;
+                    this.ego.speed = Math.max(0, this.ego.speed * 0.85);
+                }
             }
         }
 
         _updateAutopilot(dt) {
             const totalWp = this.circuitWaypoints.length;
-            const curWp = this.circuitWaypoints[this.currentWpIndex];
-            const distToCur = Math.hypot(curWp.x - this.ego.x, curWp.z - this.ego.z);
+            if (totalWp === 0) return;
 
-            // Advance strictly sequential waypoint when within 6.5m
-            if (distToCur < 6.5) {
-                this.currentWpIndex = (this.currentWpIndex + 1) % totalWp;
+            // 1. Advance waypoint monotonically along forward path
+            let bestIdx = this.currentWpIndex;
+            let minDist = Infinity;
+            const searchWindow = 14;
+            for (let offset = 0; offset < searchWindow; offset++) {
+                const idx = (this.currentWpIndex + offset) % totalWp;
+                const wp = this.circuitWaypoints[idx];
+                const d = Math.hypot(wp.x - this.ego.x, wp.z - this.ego.z);
+                if (d < minDist) {
+                    minDist = d;
+                    bestIdx = idx;
+                }
             }
+            this.currentWpIndex = bestIdx;
 
-            // Lookahead point 2 steps ahead (~10m) for smooth arc following
-            const lookaheadIdx = (this.currentWpIndex + 2) % totalWp;
-            const targetWp = this.circuitWaypoints[lookaheadIdx];
+            // 2. Pure Pursuit Lookahead Target: distance-based along circuit
+            const lookaheadDist = THREE.MathUtils.clamp(Math.abs(this.ego.speed) * 1.25 + 7.5, 7.5, 16.0);
+            let accumDist = 0;
+            let targetIdx = bestIdx;
+            while (accumDist < lookaheadDist) {
+                const nextIdx = (targetIdx + 1) % totalWp;
+                const wpA = this.circuitWaypoints[targetIdx];
+                const wpB = this.circuitWaypoints[nextIdx];
+                accumDist += Math.hypot(wpB.x - wpA.x, wpB.z - wpA.z);
+                targetIdx = nextIdx;
+                if (targetIdx === bestIdx) break;
+            }
+            const targetWp = this.circuitWaypoints[targetIdx];
 
+            // 3. Local coordinates of target relative to vehicle pose
             const dx = targetWp.x - this.ego.x;
             const dz = targetWp.z - this.ego.z;
+            const sinYaw = Math.sin(this.ego.yaw);
+            const cosYaw = Math.cos(this.ego.yaw);
+            const localFwd = -dx * sinYaw - dz * cosYaw;
+            const localRight = dx * cosYaw - dz * sinYaw;
+            const targetDist = Math.hypot(localFwd, localRight);
 
-            // Compute base heading error to target
-            const targetYaw = Math.atan2(-dx, -dz);
-            let diffYaw = targetYaw - this.ego.yaw;
-            while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
-            while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+            // Pure Pursuit steering angle: delta = atan2(2 * L * localRight, targetDist^2)
+            const wheelbase = 2.7;
+            const targetSteer = THREE.MathUtils.clamp(
+                Math.atan2(2.0 * wheelbase * localRight, Math.max(1.0, targetDist * targetDist)),
+                -0.50,
+                0.50
+            );
 
-            let baseSteer = THREE.MathUtils.clamp(-diffYaw * 1.4, -0.45, 0.45);
-            let desiredSpeed = (Math.abs(diffYaw) > 0.22) ? this.ego.turnSpeed : this.ego.cruiseSpeed;
+            // Smooth steering rate limiter
+            this.ego.steerAngle += (targetSteer - this.ego.steerAngle) * Math.min(1.0, dt * 7.5);
 
-            // ── ACTIVE HUMAN PROXIMITY DETECTION: SLOW DOWN & EVADE DIRECTION ──
-            const egoPos = new THREE.Vector3(this.ego.x, 0, this.ego.z);
-            const egoFwd = new THREE.Vector3(-Math.sin(this.ego.yaw), 0, -Math.cos(this.ego.yaw));
-            const egoRight = new THREE.Vector3(Math.cos(this.ego.yaw), 0, -Math.sin(this.ego.yaw));
+            // Determine cornering vs cruise speed
+            const isCornering = Math.abs(this.ego.steerAngle) > 0.16 || Math.abs(this.ego.z) > 65;
+            let desiredSpeed = isCornering ? this.ego.turnSpeed : this.ego.cruiseSpeed;
 
-            let evasionSteer = 0;
-            let nearestHazardDist = 999;
+            // 4. Safe Pedestrian Collision Mitigation (Only within ego travel corridor)
             this.isEvadingPedestrian = false;
-
+            let nearestHazardDist = 999;
             this.pedestrians.forEach(ped => {
-                const pedPos = new THREE.Vector3(ped.x, 0, ped.z);
-                const toPed = new THREE.Vector3().subVectors(pedPos, egoPos);
-                const forwardDist = toPed.dot(egoFwd);
-                const lateralDist = toPed.dot(egoRight);
+                const toPedX = ped.x - this.ego.x;
+                const toPedZ = ped.z - this.ego.z;
+                const pedFwd = -toPedX * sinYaw - toPedZ * cosYaw;
+                const pedLat = toPedX * cosYaw - toPedZ * sinYaw;
 
-                // If pedestrian is within 16 meters ahead and inside vehicle driving corridor (< 5.8m lateral)
-                if (forwardDist > 0.3 && forwardDist < 16.0 && Math.abs(lateralDist) < 5.8) {
-                    if (forwardDist < nearestHazardDist) {
-                        nearestHazardDist = forwardDist;
+                // Only react if pedestrian is directly inside the vehicle travel lane (|lat| < 2.0m) and ahead (1m to 12m)
+                if (pedFwd > 0.8 && pedFwd < 12.0 && Math.abs(pedLat) < 2.0) {
+                    if (pedFwd < nearestHazardDist) {
+                        nearestHazardDist = pedFwd;
                         this.isEvadingPedestrian = true;
 
-                        // 1. Slow down progressively as human gets closer
-                        if (forwardDist < 6.0) {
-                            desiredSpeed = 0.8; // Safe crawl (< 3 km/h)
-                        } else if (forwardDist < 11.0) {
-                            desiredSpeed = 2.2; // Evasion crawl (~8 km/h)
+                        // Progressive smooth braking
+                        if (pedFwd < 4.0) {
+                            desiredSpeed = 0.0;
+                        } else if (pedFwd < 8.0) {
+                            desiredSpeed = 1.8;
                         } else {
-                            desiredSpeed = 4.2; // Pre-braking (~15 km/h)
+                            desiredSpeed = 4.0;
                         }
 
-                        // 2. Change direction: Steer away from human
-                        const steerNudge = lateralDist >= 0 ? -0.36 : 0.36;
-                        const proximityWeight = 1.0 - (forwardDist / 16.0);
-                        evasionSteer = steerNudge * proximityWeight;
+                        // Gentle evasion nudge within lane limits
+                        const nudge = pedLat >= 0 ? -0.15 : 0.15;
+                        this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 3.0, -0.52, 0.52);
                     }
                 }
             });
 
-            // Combine waypoint steering with evasion steering
-            this.ego.steerAngle = THREE.MathUtils.clamp(baseSteer + evasionSteer, -0.52, 0.52);
+            // Heading update from steering angle and vehicle velocity (Ackermann model)
             this.ego.yaw -= this.ego.steerAngle * (this.ego.speed * 0.14) * dt * 3.6;
 
             // Smooth Acceleration / Braking
             if (this.ego.speed < desiredSpeed) {
                 this.ego.speed = Math.min(desiredSpeed, this.ego.speed + this.ego.accel * 0.7 * dt);
             } else {
-                this.ego.speed = Math.max(desiredSpeed, this.ego.speed - this.ego.decel * 1.1 * dt);
+                this.ego.speed = Math.max(desiredSpeed, this.ego.speed - this.ego.decel * 1.2 * dt);
             }
 
-            // Advance along heading
+            // Position update along heading
             this.ego.x -= Math.sin(this.ego.yaw) * this.ego.speed * dt;
             this.ego.z -= Math.cos(this.ego.yaw) * this.ego.speed * dt;
         }
@@ -2158,20 +2309,20 @@
             if (!this.trafficVehicles) return;
             this.trafficVehicles.forEach(tv => {
                 if (tv.speed > 0) {
-                    tv.z += tv.dir * tv.speed * dt;
-                    if (tv.dir < 0 && tv.z < -85) {
-                        tv.z = 85;
-                    } else if (tv.dir > 0 && tv.z > 85) {
-                        tv.z = -85;
-                    }
+                    tv.progress = ((tv.progress + tv.speed * dt) % (tv.totalLen || 500) + (tv.totalLen || 500)) % (tv.totalLen || 500);
+                    const pose = this._getCircuitPose(tv.progress, tv.radius || 37.5, tv.reversed || false);
+                    tv.x = pose.x;
+                    tv.z = pose.z;
+                    tv.yaw = pose.yaw;
                     tv.mesh.position.set(tv.x, 0, tv.z);
+                    tv.mesh.rotation.y = tv.yaw;
 
                     // Dynamic wheel rotation corresponding to vehicle velocity
                     if (tv.wheels && tv.wheels.length) {
                         const wheelRotSpeed = (tv.speed * dt) / 0.36;
                         tv.wheels.forEach(w => {
-                            w.children[0].rotation.x += wheelRotSpeed * tv.dir;
-                            if (w.children[1]) w.children[1].rotation.x += wheelRotSpeed * tv.dir;
+                            w.children[0].rotation.x += wheelRotSpeed;
+                            if (w.children[1]) w.children[1].rotation.x += wheelRotSpeed;
                         });
                     }
                 }
