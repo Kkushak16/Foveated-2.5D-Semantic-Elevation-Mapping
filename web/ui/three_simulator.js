@@ -996,7 +996,14 @@
             car.add(spotLight.target);
 
             // 6. Rear OLED Continuous Light Bar & Diffuser
-            const tl = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.08, 0.06), new THREE.MeshBasicMaterial({ color: 0xf43f5e }));
+            const tlMat = new THREE.MeshStandardMaterial({
+                color: 0x880015,
+                emissive: 0x550008,
+                emissiveIntensity: 0.8,
+                roughness: 0.2
+            });
+            this.ego.taillightMat = tlMat;
+            const tl = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.08, 0.06), tlMat);
             tl.position.set(0, 0.68, 2.21);
             car.add(tl);
 
@@ -1435,6 +1442,9 @@
                     speed: cfg.speed,
                     walkPhase: Math.random() * Math.PI * 2,
                     direction: 1,
+                    vx: 0,
+                    vz: 0,
+                    stumbleTimer: 0,
                     label: cfg.label
                 });
             });
@@ -1446,80 +1456,221 @@
         _initTrafficVehicles() {
             this.trafficVehicles = [];
 
-            const createCarMesh = (color, metalness = 0.85, roughness = 0.22) => {
+            const createCarMesh = (cfg) => {
                 const car = new THREE.Group();
-                const carMat = new THREE.MeshStandardMaterial({ color, metalness, roughness });
-                const darkTrimMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
-
-                // Main body
-                const body = new THREE.Mesh(new THREE.BoxGeometry(1.92, 0.52, 4.3), carMat);
-                body.position.y = 0.48;
-                body.castShadow = true;
-                car.add(body);
-
-                // Tinted cabin glass
-                const cabin = new THREE.Mesh(
-                    new THREE.BoxGeometry(1.5, 0.50, 2.1),
-                    new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.1, metalness: 0.95, transparent: true, opacity: 0.9 })
-                );
-                cabin.position.set(0, 0.98, -0.05);
-                car.add(cabin);
-
-                // Headlights (White LED)
-                const hlMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-                [-0.68, 0.68].forEach(hx => {
-                    const hl = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.12, 0.1), hlMat);
-                    hl.position.set(hx, 0.55, -2.15);
-                    car.add(hl);
+                const carMat = new THREE.MeshStandardMaterial({
+                    color: cfg.color,
+                    metalness: cfg.type === 'van' ? 0.45 : 0.86,
+                    roughness: cfg.type === 'van' ? 0.40 : 0.22
                 });
+                const darkTrimMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85, metalness: 0.2 });
+                const glassMat = new THREE.MeshStandardMaterial({ color: 0x070d18, roughness: 0.08, metalness: 0.95, transparent: true, opacity: 0.92 });
+                const chromeMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, metalness: 0.95, roughness: 0.12 });
+                const tireMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.90 });
 
-                // Taillights (Red LED)
-                const tlMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
-                const tl = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.08, 0.06), tlMat);
-                tl.position.set(0, 0.60, 2.15);
-                car.add(tl);
+                const wheels = [];
 
-                // Wheels (4 rubber tires with alloy rims)
-                const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.24, 16);
-                const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
-                [[-0.92, -1.3], [0.92, -1.3], [-0.92, 1.3], [0.92, 1.3]].forEach(([wx, wz]) => {
-                    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-                    wheel.rotation.z = Math.PI / 2;
-                    wheel.position.set(wx, 0.34, wz);
-                    car.add(wheel);
-                });
+                if (cfg.type === 'suv') {
+                    // ── CARLA CLASS: URBAN COMPACT SUV ──
+                    // Elevated lower chassis
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.62, 4.5), carMat);
+                    body.position.y = 0.62;
+                    body.castShadow = true;
+                    car.add(body);
 
-                return car;
+                    // Rugged dark wheel arch & side cladding
+                    const cladding = new THREE.Mesh(new THREE.BoxGeometry(2.08, 0.22, 4.45), darkTrimMat);
+                    cladding.position.y = 0.38;
+                    car.add(cladding);
+
+                    // Front skid plate & aggressive grille
+                    const skid = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.18, 0.12), chromeMat);
+                    skid.position.set(0, 0.32, -2.26);
+                    car.add(skid);
+
+                    // Tall SUV cabin
+                    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.64, 0.58, 2.4), glassMat);
+                    cabin.position.set(0, 1.20, 0.05);
+                    car.add(cabin);
+
+                    // Roof panel & utility roof rails
+                    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.06, 2.3), carMat);
+                    roof.position.set(0, 1.50, 0.05);
+                    car.add(roof);
+
+                    [-0.72, 0.72].forEach(rx => {
+                        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 2.2), chromeMat);
+                        rail.position.set(rx, 1.56, 0.05);
+                        car.add(rail);
+                    });
+
+                    // Projector Headlights
+                    [-0.74, 0.74].forEach(hx => {
+                        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.16, 0.12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                        hl.position.set(hx, 0.72, -2.26);
+                        car.add(hl);
+                    });
+
+                    // Taillights
+                    const tl = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.12, 0.08), new THREE.MeshBasicMaterial({ color: 0xf43f5e }));
+                    tl.position.set(0, 0.82, 2.26);
+                    car.add(tl);
+
+                    // 4 Large Off-Road Wheels
+                    const wheelGeo = new THREE.CylinderGeometry(0.39, 0.39, 0.28, 20);
+                    wheelGeo.rotateZ(Math.PI / 2);
+                    [[-1.02, -1.35], [1.02, -1.35], [-1.02, 1.35], [1.02, 1.35]].forEach(([wx, wz]) => {
+                        const wGroup = new THREE.Group();
+                        wGroup.position.set(wx, 0.39, wz);
+                        const tire = new THREE.Mesh(wheelGeo, tireMat);
+                        tire.castShadow = true;
+                        wGroup.add(tire);
+                        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.29, 16), chromeMat);
+                        rim.rotateZ(Math.PI / 2);
+                        wGroup.add(rim);
+                        car.add(wGroup);
+                        wheels.push(wGroup);
+                    });
+
+                } else if (cfg.type === 'van') {
+                    // ── CARLA CLASS: COMMERCIAL DELIVERY VAN ──
+                    // Main cargo body
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(2.10, 1.25, 4.9), carMat);
+                    body.position.y = 0.98;
+                    body.castShadow = true;
+                    car.add(body);
+
+                    // Cab windshield
+                    const cabWindshield = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.58, 0.1), glassMat);
+                    cabWindshield.position.set(0, 1.22, -2.35);
+                    cabWindshield.rotation.x = 0.25;
+                    car.add(cabWindshield);
+
+                    // Commercial front grille & heavy bumper
+                    const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.12, 0.35, 0.22), darkTrimMat);
+                    bumper.position.set(0, 0.44, -2.46);
+                    car.add(bumper);
+
+                    // Dual rear cargo door seam
+                    const doorLine = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.15, 0.04), darkTrimMat);
+                    doorLine.position.set(0, 0.98, 2.46);
+                    car.add(doorLine);
+
+                    // Vertical safety taillights
+                    [-0.95, 0.95].forEach(tx => {
+                        const tl = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.52, 0.08), new THREE.MeshBasicMaterial({ color: 0xf43f5e }));
+                        tl.position.set(tx, 1.05, 2.46);
+                        car.add(tl);
+                    });
+
+                    // Headlights
+                    [-0.82, 0.82].forEach(hx => {
+                        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                        hl.position.set(hx, 0.68, -2.46);
+                        car.add(hl);
+                    });
+
+                    // 4 Heavy-Duty Wheels
+                    const wheelGeo = new THREE.CylinderGeometry(0.37, 0.37, 0.26, 18);
+                    wheelGeo.rotateZ(Math.PI / 2);
+                    [[-1.02, -1.5], [1.02, -1.5], [-1.02, 1.45], [1.02, 1.45]].forEach(([wx, wz]) => {
+                        const wGroup = new THREE.Group();
+                        wGroup.position.set(wx, 0.37, wz);
+                        const tire = new THREE.Mesh(wheelGeo, tireMat);
+                        tire.castShadow = true;
+                        wGroup.add(tire);
+                        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.27, 12), darkTrimMat);
+                        rim.rotateZ(Math.PI / 2);
+                        wGroup.add(rim);
+                        car.add(wGroup);
+                        wheels.push(wGroup);
+                    });
+
+                } else {
+                    // ── CARLA CLASS: EXECUTIVE SPORTS SEDAN ──
+                    const body = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.48, 4.3), carMat);
+                    body.position.y = 0.48;
+                    body.castShadow = true;
+                    car.add(body);
+
+                    // Sloped hood
+                    const hood = new THREE.Mesh(new THREE.BoxGeometry(1.78, 0.14, 1.35), carMat);
+                    hood.position.set(0, 0.70, -1.35);
+                    hood.rotation.x = 0.08;
+                    car.add(hood);
+
+                    // Sleek aerodynamic cabin
+                    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.52, 0.48, 2.1), glassMat);
+                    cabin.position.set(0, 1.02, -0.05);
+                    car.add(cabin);
+
+                    // Dual Projector Headlights
+                    [-0.70, 0.70].forEach(hx => {
+                        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.12, 0.1), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                        hl.position.set(hx, 0.58, -2.16);
+                        car.add(hl);
+                    });
+
+                    // Continuous OLED Taillight Strip
+                    const tl = new THREE.Mesh(new THREE.BoxGeometry(1.80, 0.08, 0.06), new THREE.MeshBasicMaterial({ color: 0xf43f5e }));
+                    tl.position.set(0, 0.64, 2.16);
+                    car.add(tl);
+
+                    // Rear spoiler lip
+                    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.60, 0.04, 0.16), darkTrimMat);
+                    spoiler.position.set(0, 0.78, 2.10);
+                    car.add(spoiler);
+
+                    // 4 Multi-Spoke Alloy Wheels
+                    const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.24, 20);
+                    wheelGeo.rotateZ(Math.PI / 2);
+                    [[-0.96, -1.3], [0.96, -1.3], [-0.96, 1.3], [0.96, 1.3]].forEach(([wx, wz]) => {
+                        const wGroup = new THREE.Group();
+                        wGroup.position.set(wx, 0.35, wz);
+                        const tire = new THREE.Mesh(wheelGeo, tireMat);
+                        tire.castShadow = true;
+                        wGroup.add(tire);
+                        const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.25, 16), chromeMat);
+                        rim.rotateZ(Math.PI / 2);
+                        wGroup.add(rim);
+                        car.add(wGroup);
+                        wheels.push(wGroup);
+                    });
+                }
+
+                return { mesh: car, wheels };
             };
 
             const vehicleConfigs = [
-                // 1. Moving Traffic Car 1: Cruising Silver Metallic Sedan on West Lane (Moving North)
-                { x: -31.5, z: 45, speed: 7.2, dir: -1, yaw: 0, color: 0x94a3b8, label: 'vehicle' },
-                // 2. Moving Traffic Car 2: Cruising Deep Navy Blue Sedan on East Lane (Moving South)
-                { x: 31.5, z: -35, speed: 6.8, dir: 1, yaw: Math.PI, color: 0x1e3a8a, label: 'vehicle' },
+                // 1. Moving Silver Metallic Sedan on West Lane (Moving North)
+                { x: -31.5, z: 45, speed: 7.2, dir: -1, yaw: 0, color: 0x94a3b8, type: 'sedan', label: 'vehicle' },
+                // 2. Moving Deep Navy Blue Compact SUV on East Lane (Moving South)
+                { x: 31.5, z: -35, speed: 6.8, dir: 1, yaw: Math.PI, color: 0x1e3a8a, type: 'suv', label: 'vehicle' },
                 // 3. Parked Red Sedan on East outer curb
-                { x: 39.5, z: -15, speed: 0, dir: 0, yaw: 0, color: 0xb91c1c, label: 'vehicle' },
+                { x: 39.5, z: -15, speed: 0, dir: 0, yaw: 0, color: 0xb91c1c, type: 'sedan', label: 'vehicle' },
                 // 4. Parked Pearl White SUV on West outer curb
-                { x: -39.5, z: 22, speed: 0, dir: 0, yaw: Math.PI, color: 0xf8fafc, label: 'vehicle' },
-                // 5. Parked Sunset Bronze Coupe on East outer curb
-                { x: 39.5, z: 60, speed: 0, dir: 0, yaw: 0, color: 0xd97706, label: 'vehicle' },
+                { x: -39.5, z: 22, speed: 0, dir: 0, yaw: Math.PI, color: 0xf8fafc, type: 'suv', label: 'vehicle' },
+                // 5. Parked Commercial Delivery Van on East outer curb
+                { x: 39.5, z: 60, speed: 0, dir: 0, yaw: 0, color: 0x0284c7, type: 'van', label: 'vehicle' },
                 // 6. Parked Emerald Green Crossover on West outer curb
-                { x: -39.5, z: -55, speed: 0, dir: 0, yaw: Math.PI, color: 0x047857, label: 'vehicle' }
+                { x: -39.5, z: -55, speed: 0, dir: 0, yaw: Math.PI, color: 0x047857, type: 'suv', label: 'vehicle' }
             ];
 
             vehicleConfigs.forEach(cfg => {
-                const mesh = createCarMesh(cfg.color);
+                const { mesh, wheels } = createCarMesh(cfg);
                 mesh.position.set(cfg.x, 0, cfg.z);
                 mesh.rotation.y = cfg.yaw;
                 this.scene.add(mesh);
 
                 this.trafficVehicles.push({
                     mesh,
+                    wheels,
                     x: cfg.x,
                     z: cfg.z,
                     speed: cfg.speed,
                     dir: cfg.dir,
                     yaw: cfg.yaw,
+                    type: cfg.type,
                     label: cfg.label
                 });
             });
@@ -1624,9 +1775,36 @@
             // Hard collision physics: prevents penetrating pedestrians, parked cars, or guardrails!
             this._resolveCollisions(dt);
 
-            // Apply vehicle transform
+            // Apply vehicle transform with realistic suspension dynamics (pitch & body roll)
+            const speedDelta = (this.ego.speed - (this.ego.lastSpeed || 0)) / dt;
+            this.ego.lastSpeed = this.ego.speed;
+
+            // Longitudinal pitch (dives under braking, squats under acceleration)
+            const targetPitch = THREE.MathUtils.clamp(-speedDelta * 0.006, -0.045, 0.035);
+            this.ego.pitch = THREE.MathUtils.lerp(this.ego.pitch || 0, targetPitch, Math.min(1.0, dt * 9.0));
+
+            // Lateral body roll (rolls into/against turns proportional to speed & steering angle)
+            const targetRoll = THREE.MathUtils.clamp(this.ego.steerAngle * (this.ego.speed * 0.012), -0.05, 0.05);
+            this.ego.roll = THREE.MathUtils.lerp(this.ego.roll || 0, targetRoll, Math.min(1.0, dt * 8.0));
+
             this.ego.mesh.position.set(this.ego.x, 0, this.ego.z);
             this.ego.mesh.rotation.y = this.ego.yaw;
+            this.ego.mesh.rotation.x = this.ego.pitch;
+            this.ego.mesh.rotation.z = this.ego.roll;
+
+            // Dynamic reactive brake lights
+            const isBraking = this.keys.brake || (this.ego.speed > 0.5 && speedDelta < -1.5) || this.collisionAlert;
+            if (this.ego.taillightMat) {
+                if (isBraking) {
+                    this.ego.taillightMat.color.setHex(0xff0033);
+                    this.ego.taillightMat.emissive.setHex(0xff0033);
+                    this.ego.taillightMat.emissiveIntensity = 3.2;
+                } else {
+                    this.ego.taillightMat.color.setHex(0x880015);
+                    this.ego.taillightMat.emissive.setHex(0x440008);
+                    this.ego.taillightMat.emissiveIntensity = 0.6;
+                }
+            }
 
             // Animate wheels & steering angle
             this.ego.wheelRotation += (this.ego.speed * dt) / 0.36;
@@ -1674,43 +1852,55 @@
 
             const sinYaw = Math.sin(this.ego.yaw);
             const cosYaw = Math.cos(this.ego.yaw);
+            const fwdX = -sinYaw;
+            const fwdZ = -cosYaw;
 
             // Vehicle collision disks along centerline: front bumper, center chassis, rear bumper
             const carDisks = [
-                { x: this.ego.x - sinYaw * 1.5, z: this.ego.z - cosYaw * 1.5, r: 1.15 },
+                { x: this.ego.x + fwdX * 1.6, z: this.ego.z + fwdZ * 1.6, r: 1.15 },
                 { x: this.ego.x, z: this.ego.z, r: 1.15 },
-                { x: this.ego.x + sinYaw * 1.5, z: this.ego.z + cosYaw * 1.5, r: 1.15 }
+                { x: this.ego.x - fwdX * 1.6, z: this.ego.z - fwdZ * 1.6, r: 1.15 }
             ];
 
-            // 1. Collision with Pedestrians: HARD PHYSICAL ARREST (Never penetrates!)
+            // 1. Collision with Pedestrians: REALISTIC NEWTONIAN MOMENTUM & AEB ARREST
+            // Mass ratio: Car ~1500kg vs Human ~75kg.
+            // The car NEVER bounces backwards! The human receives the impact impulse,
+            // deflects outward/forward, and enters a dynamic stumble/knockback state.
             this.pedestrians.forEach(ped => {
                 carDisks.forEach(disk => {
-                    const dx = this.ego.x - ped.x;
-                    const dz = this.ego.z - ped.z;
+                    const dx = ped.x - disk.x;
+                    const dz = ped.z - disk.z;
                     const dist = Math.hypot(dx, dz);
-                    const minDist = disk.r + 0.65; // 1.80m minimum safe separation
+                    const minDist = disk.r + 0.65; // 1.80m physical envelope
 
                     if (dist < minDist && dist > 0.001) {
                         this.collisionAlert = true;
                         const overlap = minDist - dist;
-                        const nx = dx / dist;
+                        const nx = dx / dist; // Vector pointing outward from car towards pedestrian
                         const nz = dz / dist;
 
-                        // Immediately push car backwards along collision normal
-                        this.ego.x += nx * overlap * 0.85;
-                        this.ego.z += nz * overlap * 0.85;
+                        // Push pedestrian outward out of car bounding box (car is NOT pushed backwards!)
+                        ped.x += nx * overlap;
+                        ped.z += nz * overlap;
 
-                        // Hard arrest velocity (slight elastic rebound, no penetration)
-                        this.ego.speed = Math.min(0, this.ego.speed * -0.2);
+                        // Forward speed arrest: car loses momentum to impact and AEB emergency braking,
+                        // but strictly CANNOT go into negative (reverse) speed!
+                        if (this.ego.speed > 0) {
+                            this.ego.speed = Math.max(0, this.ego.speed - (this.ego.speed * 0.40 + 3.0 * dt));
+                        } else if (this.ego.speed < 0) {
+                            this.ego.speed = Math.min(0, this.ego.speed + 3.0 * dt);
+                        }
 
-                        // Human takes safe step back
-                        ped.x -= nx * overlap * 0.15;
-                        ped.z -= nz * overlap * 0.15;
+                        // Impulse momentum transfer to pedestrian
+                        const impactSpeed = Math.max(2.8, Math.abs(this.ego.speed));
+                        ped.vx = fwdX * (impactSpeed * 0.75) + nx * 2.6;
+                        ped.vz = fwdZ * (impactSpeed * 0.75) + nz * 2.6;
+                        ped.stumbleTimer = 1.8;
                     }
                 });
             });
 
-            // 2. Collision with Parked Traffic Vehicles
+            // 2. Collision with Traffic Vehicles (Realistic Stop & Separation)
             this.trafficVehicles.forEach(tv => {
                 const dx = this.ego.x - tv.x;
                 const dz = this.ego.z - tv.z;
@@ -1719,9 +1909,12 @@
                 if (dist < minDist && dist > 0.001) {
                     this.collisionAlert = true;
                     const overlap = minDist - dist;
-                    this.ego.x += (dx / dist) * overlap;
-                    this.ego.z += (dz / dist) * overlap;
-                    this.ego.speed = Math.min(0, this.ego.speed * -0.3);
+                    const nx = dx / dist;
+                    const nz = dz / dist;
+                    this.ego.x += nx * overlap * 0.6;
+                    this.ego.z += nz * overlap * 0.6;
+                    // Stop car cleanly upon vehicle impact — never throw into reverse!
+                    this.ego.speed = Math.max(0, this.ego.speed * 0.2 - 0.2);
                 }
             });
 
@@ -1730,10 +1923,9 @@
             if (Math.abs(this.ego.x) > maxTrackX) {
                 this.collisionAlert = true;
                 this.ego.x = Math.sign(this.ego.x) * maxTrackX;
-                // Guide vehicle smoothly back toward road centerline
                 this.ego.yaw = this.ego.x < 0 ? 0.0 : Math.PI;
                 this.ego.steerAngle = 0;
-                this.ego.speed = Math.max(3.0, this.ego.speed * 0.75);
+                this.ego.speed = Math.max(0, this.ego.speed * 0.75);
             }
         }
 
@@ -1857,16 +2049,69 @@
         }
 
         _updatePedestrians(dt) {
+            const egoFwdX = -Math.sin(this.ego.yaw);
+            const egoFwdZ = -Math.cos(this.ego.yaw);
+
             this.pedestrians.forEach(ped => {
+                // 1. Post-Collision Stumble / Knockback Dynamics
+                if (ped.stumbleTimer > 0) {
+                    ped.stumbleTimer -= dt;
+                    ped.x += (ped.vx || 0) * dt;
+                    ped.z += (ped.vz || 0) * dt;
+
+                    // Realistic ground sliding friction
+                    const friction = Math.pow(0.10, dt);
+                    ped.vx = (ped.vx || 0) * friction;
+                    ped.vz = (ped.vz || 0) * friction;
+
+                    // Stumble dynamic tilt (torso pitches & rolls with impact momentum)
+                    const stumbleVel = Math.hypot(ped.vx, ped.vz);
+                    const tiltAmount = Math.min(0.85, stumbleVel * 0.26);
+                    ped.mesh.rotation.z = Math.sin(ped.walkPhase) * 0.15 + (ped.vx > 0 ? tiltAmount : -tiltAmount);
+                    ped.mesh.rotation.x = ped.vz > 0 ? tiltAmount : -tiltAmount;
+
+                    // Defensive flailing arms & buckled knees
+                    if (ped.armL) { ped.armL.rotation.x = -1.35; ped.armL.rotation.z = -0.8; }
+                    if (ped.armR) { ped.armR.rotation.x = -1.35; ped.armR.rotation.z = 0.8; }
+                    if (ped.legL) ped.legL.rotation.x = 0.55;
+                    if (ped.legR) ped.legR.rotation.x = -0.45;
+                    if (ped.calfL) ped.calfL.rotation.x = 0.7;
+                    if (ped.calfR) ped.calfR.rotation.x = 0.2;
+                    if (ped.torso) ped.torso.rotation.y = Math.sin(ped.stumbleTimer * 10) * 0.20;
+
+                    ped.mesh.position.set(ped.x, Math.max(0, 0.05 * Math.sin(ped.stumbleTimer * 6)), ped.z);
+                    return;
+                }
+
+                // Smoothly restore upright posture after knockback recovers
+                ped.mesh.rotation.z *= 0.88;
+                ped.mesh.rotation.x *= 0.88;
+
+                // 2. Waypoint & Path Tracking
                 const dx = ped.targetX - ped.startX;
                 const dz = ped.targetZ - ped.startZ;
                 const totalDist = Math.hypot(dx, dz);
 
-                // Fluid human walking cadence (~1.8-2.0 steps/sec)
-                ped.walkPhase += dt * ped.speed * 3.8;
+                // 3. CARLA/Gazebo-Style Proximity Reaction
+                // If the oncoming car is within 5.5m and heading toward the pedestrian,
+                // the pedestrian accelerates into a brisk evasive stride to clear the lane.
+                const toCarX = this.ego.x - ped.x;
+                const toCarZ = this.ego.z - ped.z;
+                const distToCar = Math.hypot(toCarX, toCarZ);
+                const carHeadingToward = (toCarX * egoFwdX + toCarZ * egoFwdZ) < 0;
 
-                ped.x += (dx / totalDist) * ped.speed * ped.direction * dt;
-                ped.z += (dz / totalDist) * ped.speed * ped.direction * dt;
+                let currentSpeed = ped.speed;
+                let alertReaction = false;
+                if (distToCar < 5.8 && carHeadingToward && Math.abs(this.ego.speed) > 0.5) {
+                    alertReaction = true;
+                    currentSpeed = ped.speed * 1.65; // Evasive jogging speed
+                }
+
+                // Fluid human walking cadence (~1.8-2.2 steps/sec)
+                ped.walkPhase += dt * currentSpeed * 3.8;
+
+                ped.x += (dx / totalDist) * currentSpeed * ped.direction * dt;
+                ped.z += (dz / totalDist) * currentSpeed * ped.direction * dt;
 
                 const curDist = Math.hypot(ped.x - ped.startX, ped.z - ped.startZ);
                 if (curDist >= totalDist && ped.direction === 1) {
@@ -1875,38 +2120,43 @@
                     ped.direction = 1;
                 }
 
-                // Smooth orientation: always faces forward along velocity vector
+                // Smooth orientation: slerp rotation towards travel direction
                 const vx = (dx / totalDist) * ped.direction;
                 const vz = (dz / totalDist) * ped.direction;
-                ped.mesh.rotation.y = Math.atan2(-vx, -vz);
+                const targetYaw = Math.atan2(-vx, -vz);
+                let diffYaw = targetYaw - ped.mesh.rotation.y;
+                while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+                while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+                ped.mesh.rotation.y += diffYaw * Math.min(1.0, dt * 8.0);
 
                 // Biomechanical Walking Gait with knee and elbow articulation
-                const thighAngle = Math.sin(ped.walkPhase) * 0.44;
+                const strideAmp = alertReaction ? 0.62 : 0.44;
+                const thighAngle = Math.sin(ped.walkPhase) * strideAmp;
                 if (ped.legL) ped.legL.rotation.x = thighAngle;
                 if (ped.legR) ped.legR.rotation.x = -thighAngle;
 
-                // Knee flexion: calf bends backward when swinging forward to clear ground
-                if (ped.calfL) ped.calfL.rotation.x = Math.max(0, -thighAngle * 0.85);
-                if (ped.calfR) ped.calfR.rotation.x = Math.max(0, thighAngle * 0.85);
+                // Knee flexion: calf bends backward when swinging forward
+                if (ped.calfL) ped.calfL.rotation.x = Math.max(0, -thighAngle * 0.90);
+                if (ped.calfR) ped.calfR.rotation.x = Math.max(0, thighAngle * 0.90);
 
                 // Arm counter-stride swing with natural outward angle
                 if (ped.armL) {
-                    ped.armL.rotation.x = -thighAngle * 0.65;
-                    ped.armL.rotation.z = -0.05;
+                    ped.armL.rotation.x = -thighAngle * 0.70;
+                    ped.armL.rotation.z = -0.06;
                 }
                 if (ped.armR) {
-                    ped.armR.rotation.x = thighAngle * 0.65;
-                    ped.armR.rotation.z = 0.05;
+                    ped.armR.rotation.x = thighAngle * 0.70;
+                    ped.armR.rotation.z = 0.06;
                 }
 
-                // Subtle organic torso rotation and sway
+                // Organic torso counter-rotation and lateral sway
                 if (ped.torso) {
-                    ped.torso.rotation.y = Math.sin(ped.walkPhase) * 0.06;
-                    ped.torso.rotation.z = Math.cos(ped.walkPhase) * 0.02;
+                    ped.torso.rotation.y = Math.sin(ped.walkPhase) * 0.08;
+                    ped.torso.rotation.z = Math.cos(ped.walkPhase) * 0.03;
                 }
 
                 // Natural vertical step bounce
-                ped.mesh.position.y = Math.abs(Math.sin(ped.walkPhase)) * 0.025;
+                ped.mesh.position.y = Math.abs(Math.sin(ped.walkPhase)) * 0.032;
                 ped.mesh.position.x = ped.x;
                 ped.mesh.position.z = ped.z;
             });
@@ -1923,6 +2173,15 @@
                         tv.z = -85;
                     }
                     tv.mesh.position.set(tv.x, 0, tv.z);
+
+                    // Dynamic wheel rotation corresponding to vehicle velocity
+                    if (tv.wheels && tv.wheels.length) {
+                        const wheelRotSpeed = (tv.speed * dt) / 0.36;
+                        tv.wheels.forEach(w => {
+                            w.children[0].rotation.x += wheelRotSpeed * tv.dir;
+                            if (w.children[1]) w.children[1].rotation.x += wheelRotSpeed * tv.dir;
+                        });
+                    }
                 }
             });
         }
