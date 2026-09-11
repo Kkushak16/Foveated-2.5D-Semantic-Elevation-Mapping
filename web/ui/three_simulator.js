@@ -178,18 +178,34 @@
         }
 
         _findClosestForwardWaypoint(x, z, yaw) {
+            if (!this.circuitWaypoints || this.circuitWaypoints.length === 0) return 0;
             let bestIdx = 0;
-            let minDist = Infinity;
-            const fwdX = -Math.sin(yaw);
-            const fwdZ = -Math.cos(yaw);
-            for (let i = 0; i < this.circuitWaypoints.length; i++) {
+            let minScore = Infinity;
+            const fwdX = -Math.sin(yaw || 0);
+            const fwdZ = -Math.cos(yaw || 0);
+            const totalWp = this.circuitWaypoints.length;
+
+            for (let i = 0; i < totalWp; i++) {
                 const wp = this.circuitWaypoints[i];
                 const dx = wp.x - x;
                 const dz = wp.z - z;
                 const dist = Math.hypot(dx, dz);
-                const dot = dx * fwdX + dz * fwdZ;
-                if (dot > 0 && dist < minDist) {
-                    minDist = dist;
+
+                // Check direction of this segment of the road
+                const nextWp = this.circuitWaypoints[(i + 1) % totalWp];
+                const segX = nextWp.x - wp.x;
+                const segZ = nextWp.z - wp.z;
+                const segLen = Math.hypot(segX, segZ) || 1;
+                const segDirX = segX / segLen;
+                const segDirZ = segZ / segLen;
+
+                // How well the car heading aligns with traffic flow on this road segment
+                const headingAlign = fwdX * segDirX + fwdZ * segDirZ;
+                // Penalize driving in the opposite direction, but prioritize geographical closeness to road
+                const score = dist + (headingAlign > -0.25 ? 0 : 25.0);
+
+                if (score < minScore) {
+                    minScore = score;
                     bestIdx = i;
                 }
             }
@@ -1307,27 +1323,51 @@
                 // 1. Sidewalk West Pedestrian (strolling along West sidewalk curb)
                 { startX: -43.5, startZ: 40, targetX: -43.5, targetZ: -40, speed: 1.25, jacketColor: 0x0284c7, pantsColor: 0x1e293b, capColor: 0x0f172a, label: 'person', bag: true },
                 // 2. Sidewalk West Pedestrian (strolling along West outer promenade)
-                { startX: -43.0, startZ: -50, targetX: -43.0, targetZ: 30, speed: 1.35, jacketColor: 0xf43f5e, pantsColor: 0x334155, capColor: 0x991b1b, label: 'person', bag: false },
-                // 3. Sidewalk East Pedestrian (strolling along East sidewalk curb)
+                { startX: -43.0, startZ: -55, targetX: -43.0, targetZ: 25, speed: 1.35, jacketColor: 0xf43f5e, pantsColor: 0x334155, capColor: 0x991b1b, label: 'person', bag: false },
+                // 3. Sidewalk West Pedestrian (strolling South on West sidewalk)
+                { startX: -44.0, startZ: -20, targetX: -44.0, targetZ: 50, speed: 1.15, jacketColor: 0x10b981, pantsColor: 0x0f172a, capColor: 0x065f46, label: 'person', bag: true },
+                // 4. Sidewalk West Pedestrian (jogging North on West sidewalk)
+                { startX: -43.2, startZ: 60, targetX: -43.2, targetZ: -10, speed: 1.85, jacketColor: 0xf59e0b, pantsColor: 0x1e293b, capColor: 0x92400e, label: 'person', bag: false },
+                // 5. Sidewalk West Pedestrian (strolling near curb)
+                { startX: -43.8, startZ: 10, targetX: -43.8, targetZ: -50, speed: 1.20, jacketColor: 0xa855f7, pantsColor: 0x334155, capColor: 0x6b21a8, label: 'person', bag: true },
+                // 6. Sidewalk East Pedestrian (strolling along East sidewalk curb)
                 { startX: 43.5, startZ: 45, targetX: 43.5, targetZ: -35, speed: 1.20, jacketColor: 0xf59e0b, pantsColor: 0x0f172a, capColor: 0x78350f, label: 'person', bag: true },
-                // 4. Sidewalk East Pedestrian (strolling along East promenade)
-                { startX: 43.0, startZ: -45, targetX: 43.0, targetZ: 45, speed: 1.30, jacketColor: 0x10b981, pantsColor: 0x1e293b, capColor: 0x064e3b, label: 'person', bag: false },
-                // 5. North Promenade Arc Pedestrian (strolling along curved outer plaza)
+                // 7. Sidewalk East Pedestrian (strolling along East promenade)
+                { startX: 43.0, startZ: -50, targetX: 43.0, targetZ: 30, speed: 1.30, jacketColor: 0x10b981, pantsColor: 0x1e293b, capColor: 0x064e3b, label: 'person', bag: false },
+                // 8. Sidewalk East Pedestrian (strolling South on East sidewalk)
+                { startX: 44.0, startZ: -25, targetX: 44.0, targetZ: 55, speed: 1.18, jacketColor: 0x06b6d4, pantsColor: 0x334155, capColor: 0x0e7490, label: 'person', bag: true },
+                // 9. Sidewalk East Pedestrian (jogging North on East sidewalk)
+                { startX: 43.2, startZ: 60, targetX: 43.2, targetZ: -15, speed: 1.90, jacketColor: 0xec4899, pantsColor: 0x0f172a, capColor: 0x9d174d, label: 'person', bag: false },
+                // 10. Sidewalk East Pedestrian (strolling near curb)
+                { startX: 43.8, startZ: 15, targetX: 43.8, targetZ: -45, speed: 1.22, jacketColor: 0x3b82f6, pantsColor: 0x1e293b, capColor: 0x1e40af, label: 'person', bag: false },
+                // 11. North Promenade Arc Pedestrian (strolling along curved outer plaza)
                 { startX: -35, startZ: -102, targetX: 35, targetZ: -102, speed: 1.15, jacketColor: 0xa855f7, pantsColor: 0x334155, capColor: 0x581c87, label: 'person', bag: true },
-                // 6. South Promenade Arc Pedestrian (strolling along curved outer plaza)
+                // 12. North Promenade Outer Pedestrian (walking reverse arc)
+                { startX: 30, startZ: -106, targetX: -30, targetZ: -106, speed: 1.12, jacketColor: 0x14b8a6, pantsColor: 0x1e293b, capColor: 0x0f766e, label: 'person', bag: false },
+                // 13. South Promenade Arc Pedestrian (strolling along curved outer plaza)
                 { startX: 35, startZ: 102, targetX: -35, targetZ: 102, speed: 1.18, jacketColor: 0x06b6d4, pantsColor: 0x1e293b, capColor: 0x0e7490, label: 'person', bag: false },
-                // 7. Central Park West Trail Jogger
+                // 14. South Promenade Outer Pedestrian (walking reverse arc)
+                { startX: -30, startZ: 106, targetX: 30, targetZ: 106, speed: 1.10, jacketColor: 0xf97316, pantsColor: 0x334155, capColor: 0xc2410c, label: 'person', bag: true },
+                // 15. Central Park West Trail Jogger
                 { startX: -8, startZ: -50, targetX: -8, targetZ: 50, speed: 2.20, jacketColor: 0x3b82f6, pantsColor: 0x0f172a, capColor: 0x1d4ed8, label: 'person', bag: false },
-                // 8. Central Park East Trail Jogger
+                // 16. Central Park East Trail Jogger
                 { startX: 8, startZ: 50, targetX: 8, targetZ: -50, speed: 2.10, jacketColor: 0x10b981, pantsColor: 0x334155, capColor: 0x047857, label: 'person', bag: false },
-                // 9. Central Park Fountain Plaza Pedestrian
+                // 17. Central Park Fountain Plaza Pedestrian
                 { startX: -12, startZ: 15, targetX: 12, targetZ: 15, speed: 1.05, jacketColor: 0xf97316, pantsColor: 0x1e293b, capColor: 0xc2410c, label: 'person', bag: true },
-                // 10. Central Park South Promenade Pedestrian
+                // 18. Central Park South Promenade Pedestrian
                 { startX: -10, startZ: -25, targetX: 10, targetZ: -25, speed: 1.10, jacketColor: 0xec4899, pantsColor: 0x0f172a, capColor: 0x831843, label: 'person', bag: false },
-                // 11. Dedicated West Zebra Crosswalk Pedestrian (Crossing at Z = -20)
+                // 19. Central Park North Plaza Pedestrian
+                { startX: -14, startZ: -45, targetX: 14, targetZ: -45, speed: 1.08, jacketColor: 0x8b5cf6, pantsColor: 0x334155, capColor: 0x5b21b6, label: 'person', bag: true },
+                // 20. Central Park Garden Path Stroller
+                { startX: -6, startZ: 20, targetX: -6, targetZ: -30, speed: 1.00, jacketColor: 0xe11d48, pantsColor: 0x1e293b, capColor: 0x9f1239, label: 'person', bag: false },
+                // 21. Central Park East Garden Path Walker
+                { startX: 6, startZ: -20, targetX: 6, targetZ: 30, speed: 1.15, jacketColor: 0x0284c7, pantsColor: 0x0f172a, capColor: 0x075985, label: 'person', bag: true },
+                // 22. Dedicated West Zebra Crosswalk Pedestrian (Crossing at Z = -20)
                 { startX: -43.0, startZ: -20, targetX: -27.5, targetZ: -20, speed: 1.35, jacketColor: 0xeab308, pantsColor: 0x1e293b, capColor: 0x713f12, label: 'person', bag: true },
-                // 12. Dedicated East Zebra Crosswalk Pedestrian (Crossing at Z = 20)
-                { startX: 43.0, startZ: 20, targetX: 27.5, targetZ: 20, speed: 1.30, jacketColor: 0x8b5cf6, pantsColor: 0x334155, capColor: 0x6d28d9, label: 'person', bag: false }
+                // 23. Dedicated East Zebra Crosswalk Pedestrian (Crossing at Z = 20)
+                { startX: 43.0, startZ: 20, targetX: 27.5, targetZ: 20, speed: 1.30, jacketColor: 0x8b5cf6, pantsColor: 0x334155, capColor: 0x6d28d9, label: 'person', bag: false },
+                // 24. North-West Plaza Corner Pedestrian
+                { startX: -42.0, startZ: -75, targetX: -25.0, targetZ: -95, speed: 1.12, jacketColor: 0x059669, pantsColor: 0x1e293b, capColor: 0x064e3b, label: 'person', bag: false }
             ];
 
             pedConfigs.forEach(cfg => {
@@ -1887,8 +1927,15 @@
             this.ego.mesh.rotation.x = this.ego.pitch;
             this.ego.mesh.rotation.z = this.ego.roll;
 
-            // Dynamic reactive brake lights
-            const isBraking = this.keys.brake || (this.ego.speed > 0.5 && speedDelta < -1.5) || this.collisionAlert;
+            // Dynamic reactive brake lights: Bright red ONLY when actively braking, NEVER while accelerating!
+            const isManualAccelerating = this.keys.forward;
+            const isAutopilotAccelerating = this.autopilot && (this.ego.speed < (this.ego.desiredSpeed || 9.6) - 0.2);
+            const isAccelerating = isManualAccelerating || isAutopilotAccelerating;
+
+            const isManualBraking = this.keys.brake;
+            const isAutopilotBraking = this.autopilot && (this.ego.speed > (this.ego.desiredSpeed || 9.6) + 0.6) && (speedDelta < -1.0) && (this.ego.speed > 0.8);
+            const isBraking = !isAccelerating && (isManualBraking || isAutopilotBraking);
+
             if (this.ego.taillightMat) {
                 if (isBraking) {
                     this.ego.taillightMat.color.setHex(0xff0033);
@@ -2053,32 +2100,39 @@
             const totalWp = this.circuitWaypoints.length;
             if (totalWp === 0) return;
 
-            // 1. Advance waypoint monotonically along forward path
-            let bestIdx = this.currentWpIndex;
-            let minDist = Infinity;
-            const searchWindow = 14;
-            for (let offset = 0; offset < searchWindow; offset++) {
-                const idx = (this.currentWpIndex + offset) % totalWp;
-                const wp = this.circuitWaypoints[idx];
-                const d = Math.hypot(wp.x - this.ego.x, wp.z - this.ego.z);
-                if (d < minDist) {
-                    minDist = d;
-                    bestIdx = idx;
+            // 1. Road Re-acquisition: If vehicle is far from current waypoint (>8m), find the nearest road point!
+            const curWp = this.circuitWaypoints[this.currentWpIndex];
+            const distToCurrent = curWp ? Math.hypot(curWp.x - this.ego.x, curWp.z - this.ego.z) : 999;
+            if (distToCurrent > 8.0) {
+                this.currentWpIndex = this._findClosestForwardWaypoint(this.ego.x, this.ego.z, this.ego.yaw);
+            } else {
+                // Advance waypoint monotonically along forward path within search window
+                let bestIdx = this.currentWpIndex;
+                let minDist = Infinity;
+                const searchWindow = 16;
+                for (let offset = 0; offset < searchWindow; offset++) {
+                    const idx = (this.currentWpIndex + offset) % totalWp;
+                    const wp = this.circuitWaypoints[idx];
+                    const d = Math.hypot(wp.x - this.ego.x, wp.z - this.ego.z);
+                    if (d < minDist) {
+                        minDist = d;
+                        bestIdx = idx;
+                    }
                 }
+                this.currentWpIndex = bestIdx;
             }
-            this.currentWpIndex = bestIdx;
 
             // 2. Pure Pursuit Lookahead Target: distance-based along circuit
             const lookaheadDist = THREE.MathUtils.clamp(Math.abs(this.ego.speed) * 1.25 + 7.5, 7.5, 16.0);
             let accumDist = 0;
-            let targetIdx = bestIdx;
+            let targetIdx = this.currentWpIndex;
             while (accumDist < lookaheadDist) {
                 const nextIdx = (targetIdx + 1) % totalWp;
                 const wpA = this.circuitWaypoints[targetIdx];
                 const wpB = this.circuitWaypoints[nextIdx];
                 accumDist += Math.hypot(wpB.x - wpA.x, wpB.z - wpA.z);
                 targetIdx = nextIdx;
-                if (targetIdx === bestIdx) break;
+                if (targetIdx === this.currentWpIndex) break;
             }
             const targetWp = this.circuitWaypoints[targetIdx];
 
@@ -2106,28 +2160,70 @@
             const isCornering = Math.abs(this.ego.steerAngle) > 0.16 || Math.abs(this.ego.z) > 65;
             let desiredSpeed = isCornering ? this.ego.turnSpeed : this.ego.cruiseSpeed;
 
-            // 4. Safe Pedestrian Collision Mitigation (Only within ego travel corridor)
+            // 4. ACTIVE FORWARD HAZARD DETECTION (Vehicles & Pedestrians)
             this.isEvadingPedestrian = false;
             let nearestHazardDist = 999;
+
+            // A. Forward Traffic Vehicle Detection & Adaptive Cruise Control (ACC / AEB)
+            // Ego car must stop or slow down for other cars and NEVER collide with them!
+            if (this.trafficVehicles && this.trafficVehicles.length) {
+                this.trafficVehicles.forEach(tv => {
+                    const toCarX = tv.x - this.ego.x;
+                    const toCarZ = tv.z - this.ego.z;
+                    const carFwd = -toCarX * sinYaw - toCarZ * cosYaw;
+                    const carLat = toCarX * cosYaw - toCarZ * sinYaw;
+
+                    // Check if lead car is ahead (0.4m to 25m) and within driving corridor (|lat| < 2.3m)
+                    if (carFwd > 0.4 && carFwd < 25.0 && Math.abs(carLat) < 2.3) {
+                        if (carFwd < nearestHazardDist) {
+                            nearestHazardDist = carFwd;
+
+                            // Progressive distance-based braking & safe vehicle following
+                            if (carFwd < 4.8) {
+                                // Full Emergency Stop to prevent impact!
+                                desiredSpeed = 0.0;
+                            } else if (carFwd < 9.0) {
+                                // Safe crawling gap (~5 km/h)
+                                desiredSpeed = Math.min(desiredSpeed, 1.4);
+                            } else if (carFwd < 16.0) {
+                                // Speed match lead vehicle or maintain gentle follow speed
+                                const leadSpeed = Math.max(2.2, (tv.speed || 5.0) * 0.85);
+                                desiredSpeed = Math.min(desiredSpeed, leadSpeed);
+                            } else {
+                                // Approaching traffic: pre-brake down to 5.5 m/s
+                                desiredSpeed = Math.min(desiredSpeed, 5.5);
+                            }
+
+                            // If stopped or very slow car ahead has lateral space, gently steer around
+                            if (carFwd < 12.0 && Math.abs(carLat) > 1.2) {
+                                const nudge = carLat > 0 ? -0.12 : 0.12;
+                                this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 2.5, -0.52, 0.52);
+                            }
+                        }
+                    }
+                });
+            }
+
+            // B. Safe Pedestrian Collision Mitigation (Only within ego travel corridor)
             this.pedestrians.forEach(ped => {
                 const toPedX = ped.x - this.ego.x;
                 const toPedZ = ped.z - this.ego.z;
                 const pedFwd = -toPedX * sinYaw - toPedZ * cosYaw;
                 const pedLat = toPedX * cosYaw - toPedZ * sinYaw;
 
-                // Only react if pedestrian is directly inside the vehicle travel lane (|lat| < 2.0m) and ahead (1m to 12m)
-                if (pedFwd > 0.8 && pedFwd < 12.0 && Math.abs(pedLat) < 2.0) {
+                // Only react if pedestrian is directly inside the vehicle travel lane (|lat| < 2.0m) and ahead (0.8m to 14m)
+                if (pedFwd > 0.8 && pedFwd < 14.0 && Math.abs(pedLat) < 2.0) {
                     if (pedFwd < nearestHazardDist) {
                         nearestHazardDist = pedFwd;
                         this.isEvadingPedestrian = true;
 
                         // Progressive smooth braking
-                        if (pedFwd < 4.0) {
+                        if (pedFwd < 4.2) {
                             desiredSpeed = 0.0;
                         } else if (pedFwd < 8.0) {
-                            desiredSpeed = 1.8;
+                            desiredSpeed = Math.min(desiredSpeed, 1.6);
                         } else {
-                            desiredSpeed = 4.0;
+                            desiredSpeed = Math.min(desiredSpeed, 3.8);
                         }
 
                         // Gentle evasion nudge within lane limits
@@ -2137,6 +2233,8 @@
                 }
             });
 
+            this.ego.desiredSpeed = desiredSpeed;
+
             // Heading update from steering angle and vehicle velocity (Ackermann model)
             this.ego.yaw -= this.ego.steerAngle * (this.ego.speed * 0.14) * dt * 3.6;
 
@@ -2144,7 +2242,7 @@
             if (this.ego.speed < desiredSpeed) {
                 this.ego.speed = Math.min(desiredSpeed, this.ego.speed + this.ego.accel * 0.7 * dt);
             } else {
-                this.ego.speed = Math.max(desiredSpeed, this.ego.speed - this.ego.decel * 1.2 * dt);
+                this.ego.speed = Math.max(desiredSpeed, this.ego.speed - this.ego.decel * 1.3 * dt);
             }
 
             // Position update along heading
@@ -2503,40 +2601,34 @@
                 });
             });
 
-            // Detect roadside trees ahead in windshield camera frustum (sample at most 2 closest trees to keep forward road view crystal clear!)
+            // Track ALL roadside trees and vegetation ahead in windshield camera frustum
             if (this.trees && this.trees.length) {
-                const candidates = [];
                 this.trees.forEach(tree => {
                     const treePos = tree.pos;
                     if (!treePos) return;
                     const rel = new THREE.Vector3().subVectors(treePos, egoPos);
                     const dist = rel.length();
-                    if (dist < 4.0 || dist > 24.0) return;
+                    if (dist < 3.0 || dist > 85.0) return;
                     const dot = rel.dot(egoFwd);
-                    if (dot <= 0.3) return; // In front of vehicle
+                    if (dot <= 0.25) return; // In front of vehicle
 
                     const pProj = treePos.clone().project(this.windshieldCam);
                     if (pProj.z < 0 || pProj.z > 1) return;
                     if (pProj.x < -1.15 || pProj.x > 1.15 || pProj.y < -1.15 || pProj.y > 1.15) return;
 
-                    candidates.push({ tree, dist, pProj });
-                });
-
-                candidates.sort((a, b) => a.dist - b.dist);
-                candidates.slice(0, 2).forEach(({ tree, dist, pProj }) => {
                     const screenX = (pProj.x + 1) / 2;
                     const screenY = (-pProj.y + 1) / 2;
 
-                    const boxW = THREE.MathUtils.clamp(160 / Math.max(1, dist), 28, 90);
-                    const boxH = THREE.MathUtils.clamp(200 / Math.max(1, dist), 36, 120);
+                    const boxW = THREE.MathUtils.clamp(180 / Math.max(1, dist), 20, 110);
+                    const boxH = THREE.MathUtils.clamp(230 / Math.max(1, dist), 28, 140);
 
                     results.push({
                         label: 'tree',
                         dist: dist,
-                        ringId: dist <= 10 ? 0 : 1,
-                        resolution: dist <= 10 ? '5cm' : '15cm',
+                        ringId: dist <= 10 ? 0 : (dist <= 30 ? 1 : 2),
+                        resolution: dist <= 10 ? '5cm' : (dist <= 30 ? '15cm' : '50cm'),
                         bearing01: screenX,
-                        rangeBand: dist <= 10 ? 'near' : 'mid',
+                        rangeBand: dist <= 10 ? 'near' : (dist <= 30 ? 'mid' : 'far'),
                         confidence: 0.98,
                         masked: true,
                         maskType: 'Static Scene / Vegetation Caching',

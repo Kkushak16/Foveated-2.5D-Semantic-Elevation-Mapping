@@ -1676,51 +1676,40 @@ class UnifiedTeleopEngine {
 
         // --- 3-Ring Foveated Zone Indicators (Near / Mid / Far) ---
         // Perspective mapping: near objects appear at the bottom of the ROI,
-        // far objects appear near the top. The ROI runs from h*0.35 to h*0.85.
-        const roiTop = h * 0.35;
-        const roiBot = h * 0.85;
-        const roiH = roiBot - roiTop;
-
-        // Far ring zone (top 30% of ROI)
+           // Far ring zone (top 30% of ROI) - Crisp boundary line & badge without color-distorting fills
         const farTop = roiTop;
         const farBot = roiTop + roiH * 0.30;
-        ctx.fillStyle = 'rgba(251, 146, 60, 0.08)';
-        ctx.fillRect(0, farTop, w, farBot - farTop);
-        ctx.strokeStyle = 'rgba(251, 146, 60, 0.35)';
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.40)';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 6]);
         ctx.beginPath();
         ctx.moveTo(0, farBot); ctx.lineTo(w, farBot);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
         ctx.fillRect(6, farTop + 4, 170, 16);
         ctx.fillStyle = '#fb923c';
         ctx.font = 'bold 10px JetBrains Mono, monospace';
         ctx.fillText('◆ FAR RING 30–100m • 50cm', 10, farTop + 15);
 
-        // Mid ring zone (middle 35% of ROI)
+        // Mid ring zone (middle 35% of ROI) - Crisp boundary line & badge without color-distorting fills
         const midTop = farBot;
         const midBot = roiTop + roiH * 0.65;
-        ctx.fillStyle = 'rgba(192, 132, 252, 0.06)';
-        ctx.fillRect(0, midTop, w, midBot - midTop);
-        ctx.strokeStyle = 'rgba(192, 132, 252, 0.35)';
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.40)';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 6]);
         ctx.beginPath();
         ctx.moveTo(0, midBot); ctx.lineTo(w, midBot);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
         ctx.fillRect(6, midTop + 4, 170, 16);
         ctx.fillStyle = '#c084fc';
         ctx.font = 'bold 10px JetBrains Mono, monospace';
         ctx.fillText('◆ MID RING 10–30m • 15cm', 10, midTop + 15);
 
-        // Near ring zone (bottom 35% of ROI)
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.06)';
-        ctx.fillRect(0, midBot, w, roiBot - midBot);
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        // Near ring zone (bottom 35% of ROI) - Crisp badge without color-distorting fills
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
         ctx.fillRect(6, midBot + 4, 178, 16);
         ctx.fillStyle = '#38bdf8';
         ctx.font = 'bold 10px JetBrains Mono, monospace';
@@ -1765,7 +1754,7 @@ class UnifiedTeleopEngine {
                     fillColor = 'rgba(192, 132, 252, 0.18)';
                 }
 
-                // High-priority alert overlays
+                // High-priority alert overlays & semantic vegetation coloring
                 if (isPed && dist <= 10.0) {
                     strokeColor = '#f43f5e';
                     fillColor = 'rgba(244, 63, 94, 0.22)';
@@ -1774,14 +1763,32 @@ class UnifiedTeleopEngine {
                     fillColor = 'rgba(244, 63, 94, 0.28)';
                 } else if (isTree) {
                     strokeColor = '#10b981';
-                    fillColor = 'transparent'; // No filled background on trees so road remains 100% visible
+                    fillColor = 'rgba(16, 185, 129, 0.16)';
                 }
 
-                // Bounding Box (dashed for static scene masked elements)
-                if (!isTree) {
+                // Bounding Box & Semantic Masking
+                if (isTree) {
+                    // Full Semantic Vegetation Masking: Emerald green translucent mask with diagonal hatching
+                    ctx.fillStyle = 'rgba(16, 185, 129, 0.16)';
+                    ctx.fillRect(bx, by, bw, bh);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.rect(bx, by, bw, bh);
+                    ctx.clip();
+                    ctx.strokeStyle = 'rgba(16, 185, 129, 0.32)';
+                    ctx.lineWidth = 1;
+                    for (let xh = bx - bh; xh < bx + bw; xh += 12) {
+                        ctx.beginPath();
+                        ctx.moveTo(xh, by);
+                        ctx.lineTo(xh + bh, by + bh);
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                } else {
                     ctx.fillStyle = fillColor;
                     ctx.fillRect(bx, by, bw, bh);
                 }
+
                 ctx.strokeStyle = strokeColor;
                 ctx.lineWidth = isTree ? 1.5 : 2.5;
                 if (isTree) ctx.setLineDash([4, 4]);
@@ -1795,7 +1802,7 @@ class UnifiedTeleopEngine {
                     ctx.beginPath();
                     ctx.moveTo(bx, by + cl); ctx.lineTo(bx, by); ctx.lineTo(bx + cl, by);
                     ctx.moveTo(bx + bw - cl, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cl);
-                    ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cl, by + bh);
+                    ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx + bh); ctx.lineTo(bx + cl, by + bh);
                     ctx.moveTo(bx + bw - cl, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cl);
                     ctx.stroke();
                 }
