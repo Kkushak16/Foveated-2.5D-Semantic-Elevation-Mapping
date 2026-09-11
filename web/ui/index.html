@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lidar Perception — Real-Time 2.5D Foveated LiDAR & Camera Dashboard</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -287,7 +287,15 @@ void process_scan(const FoveatedPointBuffer& scan) {
             </button>
 
             <div class="view-selector">
-                <button class="interactive-hover-btn view-btn active" id="btn-view-bev" onclick="setDashboardView('bev')">
+                <button class="interactive-hover-btn view-btn active" id="btn-view-sim" onclick="setDashboardView('sim3d')">
+                    <span class="btn-text">🎮 3D World Sim</span>
+                    <div class="btn-hover-content">
+                        <span>🎮 3D World Sim</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+                <button class="interactive-hover-btn view-btn" id="btn-view-bev" onclick="setDashboardView('bev')">
                     <span class="btn-text">LiDAR BEV Grid</span>
                     <div class="btn-hover-content">
                         <span>LiDAR BEV Grid</span>
@@ -332,15 +340,22 @@ void process_scan(const FoveatedPointBuffer& scan) {
                 <div class="control-group">
                     <label for="select-cam-source" class="metric-label">Camera Sensor Input</label>
                     <select id="select-cam-source" class="custom-select" onchange="switchCameraSource(this.value)">
-                        <option value="synthetic" selected>🤖 Synthetic Benchmark Stream</option>
+                        <option value="simulator" selected>🎮 3D Virtual City Simulator</option>
+                        <option value="synthetic">🤖 2D Synthetic Benchmark</option>
                         <option value="webcam">📹 Live Physical Webcam Feed</option>
                     </select>
+                    <div id="camera-status-container" style="display:flex; align-items:center; justify-content:space-between; margin-top:6px;">
+                        <span id="camera-status-msg" style="font-size:11px; color:#94a3b8; font-family:'JetBrains Mono', monospace;">● Source: 3D Simulator</span>
+                        <button id="btn-retry-webcam" onclick="if(window.teleopEngine) window.teleopEngine.setCameraSource('webcam')" style="display:none; background:rgba(56,189,248,0.15); border:1px solid #38bdf8; color:#38bdf8; font-size:10px; font-weight:600; padding:3px 8px; border-radius:4px; cursor:pointer;">🔄 Retry Webcam</button>
+                    </div>
                 </div>
 
                 <div class="control-group">
                     <label for="select-motion" class="metric-label">Vehicle Trajectory Mode</label>
                     <select id="select-motion" class="custom-select" onchange="switchVehicleMotion(this.value)">
-                        <option value="stationary" selected>🅿️ Stationary / Parked (X:0.0m, Y:0.0m)</option>
+                        <option value="autopilot" selected>🔄 3D Autopilot City Patrol Loop</option>
+                        <option value="manual">🕹️ 3D Manual Teleop (WASD Driving)</option>
+                        <option value="stationary">🅿️ Stationary / Parked (X:0.0m, Y:0.0m)</option>
                         <option value="circular">🔄 Circular Orbit Simulation</option>
                     </select>
                 </div>
@@ -437,8 +452,22 @@ void process_scan(const FoveatedPointBuffer& scan) {
 
                 <!-- Canvases -->
                 <div class="canvas-wrapper" id="canvas-wrapper">
-                    <canvas id="teleop-canvas"></canvas>
+                    <canvas id="sim-3d-canvas"></canvas>
+                    <canvas id="teleop-canvas" class="hidden-canvas"></canvas>
                     <canvas id="camera-canvas" class="hidden-canvas"></canvas>
+                </div>
+
+                <!-- Interactive Driving & Simulation HUD Overlay -->
+                <div class="sim-drive-hud" id="sim-drive-hud">
+                    <div class="sim-hud-row">
+                        <div class="sim-hud-pill"><span class="pill-title">SPEED</span><span id="sim-speed-val" class="pill-value">0 km/h</span></div>
+                        <div class="sim-hud-pill"><span class="pill-title">STEERING</span><span id="sim-steer-val" class="pill-value">0.0°</span></div>
+                        <div class="sim-hud-pill badge-clickable autopilot-active" id="sim-mode-badge" onclick="window.threeSim ? (window.threeSim.autopilot = !window.threeSim.autopilot, window.threeSim._updateDrivingHud()) : null">AUTOPILOT: CRUISE</div>
+                        <div class="sim-hud-pill badge-clickable" id="sim-cam-badge" onclick="window.threeSim ? window.threeSim.cycleCameraMode() : null"><span id="sim-cam-btn-text">CAM: CHASE</span></div>
+                    </div>
+                    <div class="sim-hud-controls-hint">
+                        <span class="key-badge">W</span><span class="key-badge">A</span><span class="key-badge">S</span><span class="key-badge">D</span> Drive Car • <span class="key-badge">SPACE</span> Brake • <span class="key-badge">P</span> Autopilot • <span class="key-badge">C</span> Camera
+                    </div>
                 </div>
 
                 <!-- Monocular-depth disclaimer ticker: visible only while the live
@@ -514,6 +543,8 @@ void process_scan(const FoveatedPointBuffer& scan) {
         </div>
     </div>
 
-    <script src="teleop_dashboard.js"></script>
+    <script src="three.min.js"></script>
+    <script src="three_simulator.js?v=14"></script>
+    <script src="teleop_dashboard.js?v=14"></script>
 </body>
 </html>

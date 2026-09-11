@@ -574,16 +574,17 @@ class UnifiedTeleopEngine {
     constructor() {
         this.bevCanvas = document.getElementById('teleop-canvas');
         this.camCanvas = document.getElementById('camera-canvas');
+        this.simCanvas = document.getElementById('sim-3d-canvas');
         this.videoElem = document.getElementById('webcam-feed');
 
-        this.bevCtx = this.bevCanvas.getContext('2d');
-        this.camCtx = this.camCanvas.getContext('2d');
+        this.bevCtx = this.bevCanvas ? this.bevCanvas.getContext('2d') : null;
+        this.camCtx = this.camCanvas ? this.camCanvas.getContext('2d') : null;
 
         this.frame = 0;
         this.isRunning = true;
-        this.viewMode = 'bev'; // 'bev' | 'camera' | 'dual'
-        this.cameraSource = 'synthetic'; // 'synthetic' | 'webcam'
-        this.motionMode = 'stationary'; // 'stationary' | 'circular'
+        this.viewMode = 'sim3d'; // 'sim3d' | 'bev' | 'camera' | 'dual'
+        this.cameraSource = 'simulator'; // 'simulator' | 'synthetic' | 'webcam'
+        this.motionMode = 'autopilot'; // 'autopilot' | 'manual' | 'stationary' | 'circular'
         this.pointDensity = 100000;
 
         this.vehicleX = 0;
@@ -617,7 +618,6 @@ class UnifiedTeleopEngine {
         this._renderDurationMs = 0;   // Measured render wall-time (ms)
 
         // --- HUD label caches: only touch the DOM when text actually changes ---
-        // (prevents STATIC<->TRACKING label flicker + layout thrash at 60fps)
         this._lastFlowLabel = '';
         this._lastMaskLabel = '';
         this._lastHudSavings = '';
@@ -626,33 +626,100 @@ class UnifiedTeleopEngine {
         this._depthBannerVisible = false;
         this._depthBannerEl = null;
 
+        // 2D Synthetic Benchmark Simulation State
+        this.syntheticState = {
+            scrollOffset: 0,
+            pedProgress: 0.28,
+            pedDir: 1,
+            pedWalkCycle: 0,
+            carProgress: 0.60,
+            lastTime: performance.now()
+        };
+
+        // Initialize Three.js 3D Virtual City Simulator
+        if (typeof ThreeSimulator !== 'undefined' && this.simCanvas) {
+            try {
+                window.threeSim = new ThreeSimulator(this.simCanvas);
+            } catch (err) {
+                console.error('[ThreeSimulator init error]', err);
+            }
+        }
+
         this.init();
     }
 
     init() {
         this.resize();
         window.addEventListener('resize', () => this.resize());
+        this.setViewMode(this.viewMode);
         this.startLoop();
     }
 
     async enableWebcam() {
         if (this.webcamActive) return;
+        const statusEl = document.getElementById('camera-status-msg');
+        const retryBtn = document.getElementById('btn-retry-webcam');
+        if (statusEl) {
+            statusEl.innerText = '● Requesting physical camera...';
+            statusEl.style.color = '#38bdf8';
+        }
+
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, max: 60 }, facingMode: 'user' },
-                audio: false
-            });
+            let stream = null;
+            // Progressive constraint fallback
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+                    audio: false
+                });
+            } catch (errConstraint) {
+                console.warn('[WEBCAM] Relaxing constraints to basic video...', errConstraint);
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: true,
+                    audio: false
+                });
+            }
+
             this.videoElem.srcObject = stream;
             await this.videoElem.play();
             this.webcamActive = true;
             this.initSemanticVision();
             console.log('[WEBCAM] Live physical webcam stream initialized.');
+
+            if (statusEl) {
+                statusEl.innerText = '● Physical Camera Live';
+                statusEl.style.color = '#4ade80';
+            }
+            if (retryBtn) retryBtn.style.display = 'none';
+
+            const hudRange = document.getElementById('hud-range');
+            if (hudRange) {
+                hudRange.innerText = '📷 PHYSICAL CAMERA ACTIVE • LIVE SPATIAL FOVEATION';
+                hudRange.style.color = '#4ade80';
+            }
         } catch (err) {
             console.error('[WEBCAM ERROR]', err);
-            alert('Could not access physical webcam: ' + err.message + '\nFalling back to Synthetic Benchmark stream.');
-            this.cameraSource = 'synthetic';
+            const isDeviceInUse = err.name === 'NotReadableError' || (err.message && (err.message.includes('in use') || err.message.includes('busy')));
+            const errorMsg = isDeviceInUse
+                ? '⚠️ PHYSICAL WEBCAM LOCKED: Device is held by Microsoft Teams, Zoom, or another application. Close other camera apps, then click [🔄 Retry Webcam]. Reverting to 3D Simulator Camera.'
+                : ('⚠️ CAMERA ACCESS ERROR: ' + err.message + '. Reverting to 3D Simulator Camera.');
+
+            if (statusEl) {
+                statusEl.innerText = isDeviceInUse ? '⚠️ Camera in use (Teams/Zoom lock)' : '⚠️ Camera unavailable';
+                statusEl.style.color = '#f59e0b';
+                statusEl.title = errorMsg;
+            }
+            if (retryBtn) retryBtn.style.display = 'inline-block';
+
+            const hudRange = document.getElementById('hud-range');
+            if (hudRange) {
+                hudRange.innerText = errorMsg;
+                hudRange.style.color = '#f59e0b';
+            }
+
+            this.cameraSource = 'simulator';
             const selectElem = document.getElementById('select-cam-source');
-            if (selectElem) selectElem.value = 'synthetic';
+            if (selectElem) selectElem.value = 'simulator';
         }
     }
 
@@ -675,10 +742,27 @@ class UnifiedTeleopEngine {
         } else {
             this.disableWebcam();
         }
+        // When user chooses 2D synthetic benchmark, automatically switch to Camera Foveation view
+        if (source === 'synthetic' && this.viewMode === 'sim3d') {
+            this.setViewMode('camera');
+            document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+            const camBtn = document.getElementById('btn-view-cam');
+            if (camBtn) camBtn.classList.add('active');
+        }
     }
 
     setMotionMode(mode) {
         this.motionMode = mode;
+        if (window.threeSim) {
+            if (mode === 'autopilot') {
+                window.threeSim.autopilot = true;
+            } else if (mode === 'manual') {
+                window.threeSim.autopilot = false;
+            } else if (mode === 'stationary') {
+                window.threeSim.autopilot = false;
+                window.threeSim.ego.speed = 0;
+            }
+        }
         if (mode === 'stationary') {
             this.vehicleX = 0;
             this.vehicleY = 0;
@@ -694,35 +778,61 @@ class UnifiedTeleopEngine {
         let h = rect ? rect.height : window.innerHeight * 0.7;
 
         if (this.viewMode === 'dual') {
-            w = (w - 10) / 2;
+            w = (w - 12) / 2;
         }
 
         const targetW = Math.max(300, Math.floor(w));
         const targetH = Math.max(300, Math.floor(h));
 
-        this.bevCanvas.width = targetW;
-        this.bevCanvas.height = targetH;
+        if (this.bevCanvas) {
+            this.bevCanvas.width = targetW;
+            this.bevCanvas.height = targetH;
+        }
 
-        this.camCanvas.width = targetW;
-        this.camCanvas.height = targetH;
+        if (this.camCanvas) {
+            this.camCanvas.width = targetW;
+            this.camCanvas.height = targetH;
+        }
+
+        if (this.simCanvas) {
+            if (window.threeSim) {
+                window.threeSim.resize(targetW, targetH);
+            } else {
+                this.simCanvas.width = targetW;
+                this.simCanvas.height = targetH;
+            }
+        }
     }
 
     setViewMode(mode) {
         this.viewMode = mode;
         const hudMode = document.getElementById('hud-mode');
+        const driveHud = document.getElementById('sim-drive-hud');
 
-        if (mode === 'bev') {
-            this.bevCanvas.classList.remove('hidden-canvas');
-            this.camCanvas.classList.add('hidden-canvas');
-            hudMode.innerText = 'VIEW: 3-RING LIDAR BEV EGO-GRID';
+        if (this.simCanvas) this.simCanvas.classList.add('hidden-canvas');
+        if (this.bevCanvas) this.bevCanvas.classList.add('hidden-canvas');
+        if (this.camCanvas) this.camCanvas.classList.add('hidden-canvas');
+
+        if (mode === 'sim3d') {
+            if (this.simCanvas) this.simCanvas.classList.remove('hidden-canvas');
+            if (hudMode) hudMode.innerText = 'VIEW: 3D VIRTUAL CITY SIMULATOR (DRIVE: WASD)';
+            if (driveHud) driveHud.style.display = 'flex';
+        } else if (mode === 'bev') {
+            if (this.bevCanvas) this.bevCanvas.classList.remove('hidden-canvas');
+            if (hudMode) hudMode.innerText = 'VIEW: 3-RING LIDAR BEV EGO-GRID';
+            if (driveHud) driveHud.style.display = 'none';
         } else if (mode === 'camera') {
-            this.bevCanvas.classList.add('hidden-canvas');
-            this.camCanvas.classList.remove('hidden-canvas');
-            hudMode.innerText = 'VIEW: DUAL-SENSOR CAMERA FOVEATION';
+            if (this.camCanvas) this.camCanvas.classList.remove('hidden-canvas');
+            if (hudMode) hudMode.innerText = 'VIEW: DUAL-SENSOR CAMERA FOVEATION';
+            if (driveHud) driveHud.style.display = 'none';
         } else if (mode === 'dual') {
-            this.bevCanvas.classList.remove('hidden-canvas');
-            this.camCanvas.classList.remove('hidden-canvas');
-            hudMode.innerText = 'VIEW: DUAL-SENSOR FUSION SPLIT';
+            // Dual Split: Camera Foveation (left) + LiDAR BEV Grid (right)
+            // This shows the live camera feed (webcam, simulator windshield, or synthetic)
+            // alongside the BEV grid, so the user always sees both sensor modalities.
+            if (this.camCanvas) this.camCanvas.classList.remove('hidden-canvas');
+            if (this.bevCanvas) this.bevCanvas.classList.remove('hidden-canvas');
+            if (hudMode) hudMode.innerText = 'VIEW: CAMERA FOVEATION & LIDAR BEV DUAL SPLIT';
+            if (driveHud) driveHud.style.display = 'none';
         }
         this.resize();
     }
@@ -772,16 +882,67 @@ class UnifiedTeleopEngine {
     update() {
         this.frame++;
 
-        // Ego Trajectory Updates
-        if (this.motionMode === 'circular') {
-            this.vehicleX = Math.cos(this.frame * 0.02) * 0.04;
-            this.vehicleY = Math.sin(this.frame * 0.02) * 0.04;
-            this.yaw = (this.frame * 0.015) % (Math.PI * 2);
+        // 3D Virtual City Simulator integration
+        if (window.threeSim) {
+            window.threeSim.update(0.016);
+            this.vehicleX = window.threeSim.ego.x;
+            this.vehicleY = window.threeSim.ego.z;
+            this.yaw = window.threeSim.ego.yaw;
+
+            if (this.cameraSource === 'simulator') {
+                const detected = window.threeSim.getDetectedObjects();
+                this.cameraTargets = detected.map(d => ({
+                    bearing01: d.bearing01,
+                    rangeBand: d.rangeBand,
+                    color: this.semanticLabelColor(d.label),
+                    conf: d.confidence,
+                    label: d.label
+                }));
+
+                const hudRange = document.getElementById('hud-range');
+                if (hudRange) {
+                    const nearestPed = detected.find(d => d.label === 'person');
+                    const nearestPothole = detected.find(d => d.label === 'pothole');
+                    const nearestTree = detected.find(d => d.label === 'tree');
+                    if (window.threeSim.collisionAlert) {
+                        hudRange.innerText = '💥 COLLISION RESOLVED: HARD IMPACT ARRESTED • ZERO PENETRATION';
+                        hudRange.style.color = '#ef4444';
+                    } else if (window.threeSim.isEvadingPedestrian) {
+                        hudRange.innerText = `🚨 EVADING PEDESTRIAN (${nearestPed ? nearestPed.dist.toFixed(1) + 'm' : '<16m'}) • SLOWDOWN & STEER AWAY`;
+                        hudRange.style.color = '#f43f5e';
+                    } else if (nearestPed && nearestPed.dist <= 16.0) {
+                        hudRange.innerText = `🚶 PROXIMITY ALERT: PEDESTRIAN (${nearestPed.dist.toFixed(1)}m) • AUTO-DECELERATING`;
+                        hudRange.style.color = '#f43f5e';
+                    } else if (nearestTree && nearestTree.dist <= 26.0) {
+                        hudRange.innerText = `🌲 VEGETATION DETECTED (${nearestTree.dist.toFixed(1)}m) • STATIC MASK APPLIED (95% GPU Caching)`;
+                        hudRange.style.color = '#10b981';
+                    } else if (nearestPothole && nearestPothole.dist <= 25.0) {
+                        hudRange.innerText = `🕳️ 2.5D ELEVATION HAZARD: POTHOLE (${nearestPothole.dist.toFixed(1)}m, -12cm DEPTH) • 5cm Res`;
+                        hudRange.style.color = '#fb923c';
+                    } else if (nearestPed) {
+                        hudRange.innerText = `🚶 PED: ${nearestPed.rangeBand.toUpperCase()} (${nearestPed.dist.toFixed(1)}m) ${(nearestPed.confidence * 100).toFixed(0)}%`;
+                        hudRange.style.color = '#4ade80';
+                    } else if (detected.length > 0) {
+                        const nearest = detected[0];
+                        hudRange.innerText = `🚗 ${nearest.label.toUpperCase()}: ${nearest.rangeBand.toUpperCase()} (${nearest.dist.toFixed(1)}m)`;
+                        hudRange.style.color = '';
+                    } else {
+                        hudRange.innerText = '🚗 3D SCAN: ROAD CLEAR';
+                        hudRange.style.color = '';
+                    }
+                }
+            }
         } else {
-            // Stationary Mode (Parked Vehicle)
-            this.vehicleX = 0;
-            this.vehicleY = 0;
-            this.yaw = 0;
+            // Ego Trajectory Updates fallback
+            if (this.motionMode === 'circular') {
+                this.vehicleX = Math.cos(this.frame * 0.02) * 0.04;
+                this.vehicleY = Math.sin(this.frame * 0.02) * 0.04;
+                this.yaw = (this.frame * 0.015) % (Math.PI * 2);
+            } else {
+                this.vehicleX = 0;
+                this.vehicleY = 0;
+                this.yaw = 0;
+            }
         }
 
         const hudEgo = document.getElementById('hud-ego-pos');
@@ -796,6 +957,12 @@ class UnifiedTeleopEngine {
         if (this.cameraSource === 'webcam' && this.webcamActive) {
             this.runSemanticVision();
         }
+
+        // Render 3D simulation canvas when active
+        if (window.threeSim && (this.viewMode === 'sim3d' || this.viewMode === 'dual')) {
+            window.threeSim.render();
+        }
+
         this.drawLidarBEV();
         this.drawCameraFoveation();
         this._updatePipelineTelemetry();
@@ -982,6 +1149,8 @@ class UnifiedTeleopEngine {
             case 'bus': return '#fb923c';
             case 'motorcycle': return '#a855f7';
             case 'bicycle': return '#22c55e';
+            case 'pothole': return '#f43f5e';
+            case 'tree': return '#10b981';
             default: return '#94a3b8';
         }
     }
@@ -1133,32 +1302,136 @@ class UnifiedTeleopEngine {
         ctx.stroke();
         ctx.restore();
 
-        // Camera-fused dynamic obstacles: every live camera track is projected
-        // into the BEV at its range band (near 6m / mid 20m / far 60m) and
-        // bearing from the box center-x, drawn in the matching ring color with
-        // a red dynamic outline. Works in BOTH motion modes.
+        // Camera-fused dynamic obstacles + Direct 3D Simulator Actor Projection
+        // All actors (pedestrians, vehicles, potholes, trees) are projected
+        // onto the BEV with distinct shapes, glow effects, and ring-colored badges.
         const RANGE_DIST = { near: 6, mid: 20, far: 60 };
         const RANGE_COLOR = { near: '#38bdf8', mid: '#c084fc', far: '#fb923c' };
-        for (const t of this.cameraTargets) {
-            const dist = RANGE_DIST[t.rangeBand] || 20;
-            const bearing = (t.bearing01 - 0.5) * Math.PI; // -90°..+90° across FOV
-            const ox = cx + Math.sin(bearing) * dist * scale * 2;
-            const oy = cy - Math.cos(bearing) * dist * scale * 2;
-            // Semantic (YOLO) targets carry a label → draw them in their
-            // class colour; motion-only targets keep the ring colour.
-            const tColor = t.label ? this.semanticLabelColor(t.label) : (RANGE_COLOR[t.rangeBand] || '#f43f5e');
-            ctx.fillStyle = tColor;
-            ctx.fillRect(ox - 4, oy - 4, 8, 8);
-            ctx.strokeStyle = t.label === 'person' ? '#4ade80' : '#f43f5e';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(ox - 6, oy - 6, 12, 12);
-            ctx.fillStyle = tColor;
-            ctx.font = 'bold 10px JetBrains Mono, monospace';
-            const tag = t.label
-                ? (t.label === 'person' ? 'P' : (t.label === 'vehicle' ? 'V' : t.label.slice(0, 3).toUpperCase()))
-                : (t.rangeBand ? t.rangeBand.toUpperCase() : '??');
-            ctx.fillText(tag, ox + 9, oy + 4);
+
+        // Collect all actors for BEV projection (from 3D simulator directly)
+        const bevActors = [];
+        if (window.threeSim) {
+            const ego = window.threeSim.ego;
+            const fwdX = -Math.sin(ego.yaw);
+            const fwdZ = -Math.cos(ego.yaw);
+            const rightX = -fwdZ;
+            const rightZ = fwdX;
+
+            // Pedestrians
+            (window.threeSim.pedestrians || []).forEach(ped => {
+                const dx = ped.x - ego.x;
+                const dz = ped.z - ego.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 85) return;
+                const localFwd = dx * fwdX + dz * fwdZ;
+                const localRight = dx * rightX + dz * rightZ;
+                bevActors.push({
+                    x: cx + localRight * scale * 2,
+                    y: cy - localFwd * scale * 2,
+                    dist, label: 'person', icon: '🚶', shape: 'circle'
+                });
+            });
+
+            // Traffic Vehicles
+            (window.threeSim.trafficVehicles || []).forEach(tv => {
+                const dx = tv.x - ego.x;
+                const dz = tv.z - ego.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist > 85) return;
+                const localFwd = dx * fwdX + dz * fwdZ;
+                const localRight = dx * rightX + dz * rightZ;
+                bevActors.push({
+                    x: cx + localRight * scale * 2,
+                    y: cy - localFwd * scale * 2,
+                    dist, label: tv.label || 'vehicle', icon: '🚗', shape: 'rect'
+                });
+            });
         }
+
+        // Also include camera-only targets (for webcam/synthetic when no 3D sim)
+        if (!window.threeSim || bevActors.length === 0) {
+            for (const t of this.cameraTargets) {
+                const dist = RANGE_DIST[t.rangeBand] || 20;
+                const bearing = (t.bearing01 - 0.5) * Math.PI;
+                bevActors.push({
+                    x: cx + Math.sin(bearing) * dist * scale * 2,
+                    y: cy - Math.cos(bearing) * dist * scale * 2,
+                    dist, label: t.label || 'object', icon: t.label === 'person' ? '🚶' : '🚗',
+                    shape: t.label === 'person' ? 'circle' : 'rect'
+                });
+            }
+        }
+
+        // Render each actor with distinct shape, glow, and labelled badge
+        const pulse = (Math.sin(this.frame * 0.12) + 1) * 1.5;
+        bevActors.forEach(actor => {
+            const isPed = actor.label === 'person';
+            const isVehicle = actor.label === 'vehicle' || actor.label === 'car' || actor.label === 'truck' || actor.label === 'bus';
+
+            // Ring color based on distance
+            let ringColor = '#fb923c'; // far
+            if (actor.dist <= 10) ringColor = '#38bdf8'; // near
+            else if (actor.dist <= 30) ringColor = '#c084fc'; // mid
+
+            const actorColor = isPed ? '#4ade80' : (isVehicle ? '#38bdf8' : '#f43f5e');
+
+            ctx.save();
+
+            // Outer glow ring (pulsing)
+            ctx.strokeStyle = actorColor;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.arc(actor.x, actor.y, 10 + pulse, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+
+            // Shape fill
+            if (isPed) {
+                // Circle for pedestrians
+                ctx.fillStyle = actorColor;
+                ctx.beginPath();
+                ctx.arc(actor.x, actor.y, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            } else if (isVehicle) {
+                // Rectangle for vehicles (larger)
+                ctx.fillStyle = actorColor;
+                ctx.fillRect(actor.x - 7, actor.y - 5, 14, 10);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(actor.x - 7, actor.y - 5, 14, 10);
+            } else {
+                // Diamond for other objects
+                ctx.fillStyle = actorColor;
+                ctx.beginPath();
+                ctx.moveTo(actor.x, actor.y - 7);
+                ctx.lineTo(actor.x + 6, actor.y);
+                ctx.lineTo(actor.x, actor.y + 7);
+                ctx.lineTo(actor.x - 6, actor.y);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Label badge with distance
+            const tag = isPed ? `PED ${actor.dist.toFixed(0)}m` : (isVehicle ? `VEH ${actor.dist.toFixed(0)}m` : `OBJ ${actor.dist.toFixed(0)}m`);
+            ctx.font = 'bold 9px JetBrains Mono, monospace';
+            const tagW = ctx.measureText(tag).width + 8;
+            ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+            ctx.fillRect(actor.x + 12, actor.y - 7, tagW, 15);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(actor.x + 12, actor.y - 7, tagW, 15);
+            ctx.fillStyle = actorColor;
+            ctx.fillText(tag, actor.x + 16, actor.y + 4);
+
+            ctx.restore();
+        });
 
         // Demo obstacles in circular orbit mode (kept alongside camera tracks)
         if (this.motionMode === 'circular') {
@@ -1169,9 +1442,80 @@ class UnifiedTeleopEngine {
                 const oy = cy + Math.sin(oAngle) * oDist * scale * 2;
 
                 ctx.fillStyle = '#f43f5e';
-                ctx.fillRect(ox - 3, oy - 3, 6, 6);
+                ctx.beginPath();
+                ctx.arc(ox, oy, 4, 0, Math.PI * 2);
+                ctx.fill();
             }
         }
+
+        // 2.5D LiDAR Elevation Deficit Hazards (Potholes Tracking in Dual Split Sensor)
+        const activePotholes = [];
+        if (window.threeSim && window.threeSim.potholes) {
+            window.threeSim.potholes.forEach(ph => {
+                const dx = ph.x - window.threeSim.ego.x;
+                const dz = ph.z - window.threeSim.ego.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist <= 85) {
+                    // Convert to vehicle-centric polar / Cartesian coordinates
+                    const fwdX = -Math.sin(window.threeSim.ego.yaw);
+                    const fwdZ = -Math.cos(window.threeSim.ego.yaw);
+                    const rightX = -fwdZ;
+                    const rightZ = fwdX;
+
+                    const localFwd = dx * fwdX + dz * fwdZ;
+                    const localRight = dx * rightX + dz * rightZ;
+
+                    activePotholes.push({
+                        x: cx + localRight * scale * 2,
+                        y: cy - localFwd * scale * 2,
+                        dist: dist,
+                        depth: ph.depth || '-12cm'
+                    });
+                }
+            });
+        } else if (this.cameraSource === 'synthetic') {
+            activePotholes.push({
+                x: cx + 18 * scale * 2,
+                y: cy - 14.8 * scale * 2,
+                dist: 14.8,
+                depth: '-12cm'
+            });
+        }
+
+        activePotholes.forEach(ph => {
+            ctx.save();
+            const pulse = (Math.sin(this.frame * 0.15) + 1) * 2.5;
+
+            // Outer red hazard warning ring
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(ph.x, ph.y, 8 + pulse, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Inner negative elevation depression
+            ctx.fillStyle = '#05070a';
+            ctx.beginPath();
+            ctx.arc(ph.x, ph.y, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // 2.5D Elevation crosshair
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(ph.x - 9, ph.y); ctx.lineTo(ph.x + 9, ph.y);
+            ctx.moveTo(ph.x, ph.y - 9); ctx.lineTo(ph.x, ph.y + 9);
+            ctx.stroke();
+
+            // Metric label & depth readout
+            ctx.fillStyle = '#f43f5e';
+            ctx.font = 'bold 9px JetBrains Mono, monospace';
+            ctx.fillText(`🕳️ ${ph.depth} (${ph.dist.toFixed(0)}m)`, ph.x + 11, ph.y + 3);
+            ctx.restore();
+        });
 
         // Draw Ego Vehicle Symbol
         ctx.save();
@@ -1202,7 +1546,12 @@ class UnifiedTeleopEngine {
 
         let sourceElem = null;
 
-        if (this.cameraSource === 'webcam' && this.webcamActive && this.videoElem.readyState >= 2) {
+        if (this.cameraSource === 'simulator' && window.threeSim) {
+            // FORWARD WINDSHIELD CAMERA RENDER FROM 3D SIMULATOR
+            const windCanvas = window.threeSim.renderWindshield();
+            ctx.drawImage(windCanvas, 0, 0, w, h);
+            sourceElem = this.camCanvas;
+        } else if (this.cameraSource === 'webcam' && this.webcamActive && this.videoElem.readyState >= 2) {
             // LIVE PHYSICAL WEBCAM STREAM
             sourceElem = this.videoElem;
             ctx.save();
@@ -1210,44 +1559,66 @@ class UnifiedTeleopEngine {
             ctx.drawImage(this.videoElem, -w, 0, w, h);
             ctx.restore();
         } else {
-            // SYNTHETIC BENCHMARK STREAM
-            ctx.fillStyle = '#0f172a';
-            ctx.fillRect(0, 0, w, h);
-
-            // Perspective Road Lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.lineWidth = 2;
-
-            ctx.beginPath();
-            ctx.moveTo(w * 0.45, h * 0.45);
-            ctx.lineTo(w * 0.1, h * 0.85);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.moveTo(w * 0.55, h * 0.45);
-            ctx.lineTo(w * 0.9, h * 0.85);
-            ctx.stroke();
-
+            // 2D DYNAMIC SYNTHETIC BENCHMARK STREAM (Animated 60 FPS)
+            this._drawSyntheticBenchmark(ctx, w, h);
             sourceElem = this.camCanvas;
         }
 
         // A generic webcam has no reliable horizon or vehicle hood, so do not label
         // its geometric compute exclusions as semantic sky/hood classifications.
         const isWebcam = this.cameraSource === 'webcam' && this.webcamActive;
-        const topLabel = isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)' : '🚫 SKY REGION MASKED (35% Pixel Savings)';
-        const bottomLabel = isWebcam ? '🚫 BOTTOM EXCLUSION ZONE (15% Pixel Savings)' : '🚫 VEHICLE HOOD MASKED (15% Pixel Savings)';
-
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.80)';
+        const topLabel = this.cameraSource === 'simulator'
+            ? '🚫 SKY REGION MASKED (35% Pixel Savings • Dynamic 3D Dome)'
+            : (isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)' : '🚫 SKY REGION MASKED (35% Pixel Savings • 2D Synthetic Benchmark)');
+        const bottomLabel = this.cameraSource === 'simulator'
+            ? '🚫 HOOD REGION MASKED (15% Pixel Savings • Vehicle Geometry)'
+            : (isWebcam ? '🚫 BOTTOM EXCLUSION ZONE (15% Pixel Savings)' : '🚫 HOOD REGION MASKED (15% Pixel Savings • Road Heuristic)');
+        // Subtle, translucent high-tech foveation masks — darkened for visibility
+        ctx.save();
+        // Top 35% Sky Mask (Darkened translucent with hatching)
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.52)';
         ctx.fillRect(0, 0, w, h * 0.35);
-        ctx.fillStyle = 'rgba(244, 63, 94, 0.92)';
-        ctx.font = 'bold 12px Inter, sans-serif';
-        ctx.fillText(topLabel, 16, 24);
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.22)';
+        ctx.lineWidth = 1;
+        for (let lx = -h * 0.35; lx < w; lx += 28) {
+            ctx.beginPath();
+            ctx.moveTo(lx, 0);
+            ctx.lineTo(lx + h * 0.35, h * 0.35);
+            ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+        ctx.fillRect(12, 10, 480, 24);
+        ctx.strokeStyle = '#f43f5e';
+        ctx.strokeRect(12, 10, 480, 24);
+        ctx.fillStyle = '#f43f5e';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText(topLabel, 20, 26);
 
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.80)';
-        ctx.fillRect(0, h * 0.85, w, h * 0.15);
-        ctx.fillStyle = 'rgba(244, 63, 94, 0.92)';
-        ctx.fillText(bottomLabel, 16, h - 12);
+        // Bottom 15% Hood Region (Dark fill + dashed boundary)
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.48)';
+        ctx.fillRect(0, h * 0.88, w, h * 0.12);
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.22)';
+        ctx.lineWidth = 1;
+        for (let lx = -h * 0.12; lx < w; lx += 28) {
+            ctx.beginPath();
+            ctx.moveTo(lx, h * 0.88);
+            ctx.lineTo(lx + h * 0.12, h);
+            ctx.stroke();
+        }
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.55)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(0, h * 0.88);
+        ctx.lineTo(w, h * 0.88);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#f43f5e';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText(bottomLabel, 16, h - 14);
+        ctx.restore();
 
+        // Active ROI border
         ctx.strokeStyle = '#4ade80';
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 6]);
@@ -1256,6 +1627,172 @@ class UnifiedTeleopEngine {
         ctx.fillStyle = '#4ade80';
         ctx.font = 'bold 12px Inter, sans-serif';
         ctx.fillText('✅ ACTIVE FOVEATED ROI (50% Retained)', w - 238, h * 0.38);
+
+        // --- 3-Ring Foveated Zone Indicators (Near / Mid / Far) ---
+        // Perspective mapping: near objects appear at the bottom of the ROI,
+        // far objects appear near the top. The ROI runs from h*0.35 to h*0.85.
+        const roiTop = h * 0.35;
+        const roiBot = h * 0.85;
+        const roiH = roiBot - roiTop;
+
+        // Far ring zone (top 30% of ROI)
+        const farTop = roiTop;
+        const farBot = roiTop + roiH * 0.30;
+        ctx.fillStyle = 'rgba(251, 146, 60, 0.08)';
+        ctx.fillRect(0, farTop, w, farBot - farTop);
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        ctx.moveTo(0, farBot); ctx.lineTo(w, farBot);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        ctx.fillRect(6, farTop + 4, 170, 16);
+        ctx.fillStyle = '#fb923c';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.fillText('◆ FAR RING 30–100m • 50cm', 10, farTop + 15);
+
+        // Mid ring zone (middle 35% of ROI)
+        const midTop = farBot;
+        const midBot = roiTop + roiH * 0.65;
+        ctx.fillStyle = 'rgba(192, 132, 252, 0.06)';
+        ctx.fillRect(0, midTop, w, midBot - midTop);
+        ctx.strokeStyle = 'rgba(192, 132, 252, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 6]);
+        ctx.beginPath();
+        ctx.moveTo(0, midBot); ctx.lineTo(w, midBot);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        ctx.fillRect(6, midTop + 4, 170, 16);
+        ctx.fillStyle = '#c084fc';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.fillText('◆ MID RING 10–30m • 15cm', 10, midTop + 15);
+
+        // Near ring zone (bottom 35% of ROI)
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.06)';
+        ctx.fillRect(0, midBot, w, roiBot - midBot);
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.65)';
+        ctx.fillRect(6, midBot + 4, 178, 16);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.fillText('◆ NEAR RING 0–10m • 5cm', 10, midBot + 15);
+
+        // Draw detected objects with explicit SEMANTIC RING & METRIC RANGE
+        let targetList = [];
+        if (this.cameraSource === 'simulator' && window.threeSim) {
+            targetList = window.threeSim.getDetectedObjects();
+        } else if (this.cameraSource === 'synthetic') {
+            targetList = this._getSyntheticDetectedObjects(w, h);
+        }
+
+        if (targetList.length > 0) {
+            targetList.forEach(d => {
+                const bx = (d.box.x * w) - (d.box.w / 2);
+                const by = (d.box.y * h) - (d.box.h / 2);
+                const bw = d.box.w;
+                const bh = d.box.h;
+
+                const isPed = d.label === 'person';
+                const isPothole = d.label === 'pothole';
+                const isTree = d.label === 'tree' || d.masked;
+                const dist = d.dist || 12.0;
+
+                // Color-code according to exact 3-ring foveated hierarchy:
+                // Ring 0: 0-10m (#38bdf8 Cyan), Ring 1: 10-30m (#c084fc Purple), Ring 2: 30-100m (#fb923c Orange)
+                let ringName = 'RING 2 (FAR: 30–100m)';
+                let ringRes = '50cm Res';
+                let strokeColor = '#fb923c';
+                let fillColor = 'rgba(251, 146, 60, 0.15)';
+
+                if (dist <= 10.0) {
+                    ringName = 'RING 0 (NEAR: 0–10m)';
+                    ringRes = '5cm Res';
+                    strokeColor = '#00f0ff';
+                    fillColor = 'rgba(0, 240, 255, 0.18)';
+                } else if (dist <= 30.0) {
+                    ringName = 'RING 1 (MID: 10–30m)';
+                    ringRes = '15cm Res';
+                    strokeColor = '#c084fc';
+                    fillColor = 'rgba(192, 132, 252, 0.18)';
+                }
+
+                // High-priority alert overlays
+                if (isPed && dist <= 10.0) {
+                    strokeColor = '#f43f5e';
+                    fillColor = 'rgba(244, 63, 94, 0.22)';
+                } else if (isPothole) {
+                    strokeColor = '#f43f5e';
+                    fillColor = 'rgba(244, 63, 94, 0.28)';
+                } else if (isTree) {
+                    strokeColor = '#10b981';
+                    fillColor = 'transparent'; // No filled background on trees so road remains 100% visible
+                }
+
+                // Bounding Box (dashed for static scene masked elements)
+                if (!isTree) {
+                    ctx.fillStyle = fillColor;
+                    ctx.fillRect(bx, by, bw, bh);
+                }
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = isTree ? 1.5 : 2.5;
+                if (isTree) ctx.setLineDash([4, 4]);
+                ctx.strokeRect(bx, by, bw, bh);
+                if (isTree) ctx.setLineDash([]);
+
+                // Corner Brackets for active dynamic objects
+                if (!isTree) {
+                    const cl = Math.min(12, bw / 3);
+                    ctx.lineWidth = 3.5;
+                    ctx.beginPath();
+                    ctx.moveTo(bx, by + cl); ctx.lineTo(bx, by); ctx.lineTo(bx + cl, by);
+                    ctx.moveTo(bx + bw - cl, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cl);
+                    ctx.moveTo(bx, by + bh - cl); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cl, by + bh);
+                    ctx.moveTo(bx + bw - cl, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cl);
+                    ctx.stroke();
+                }
+
+                // Top Header Badge
+                ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
+                let tag = `🚗 VEHICLE | ${ringName.split(' ')[0]} ${dist.toFixed(1)}m | ${(d.confidence * 100).toFixed(0)}%`;
+                if (isPed) {
+                    tag = `🚶 PEDESTRIAN | ${ringName.split(' ')[0]} ${dist.toFixed(1)}m | ${(d.confidence * 100).toFixed(0)}%`;
+                } else if (isPothole) {
+                    tag = `🕳️ POTHOLE | -12cm DEPTH | ${dist.toFixed(1)}m`;
+                } else if (isTree) {
+                    tag = `🌲 VEGETATION (STATIC MASK) • ${dist.toFixed(1)}m`;
+                }
+
+                ctx.font = 'bold 10px JetBrains Mono, monospace';
+                const tagW = ctx.measureText(tag).width + 12;
+                const tagY = Math.max(h * 0.35 + 4, by - 22);
+                ctx.fillRect(bx, tagY, tagW, 18);
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = 1.0;
+                ctx.strokeRect(bx, tagY, tagW, 18);
+                ctx.fillStyle = strokeColor;
+                ctx.fillText(tag, bx + 6, tagY + 13);
+
+                // Bottom Range Badge (Only for dynamic actors like pedestrians, cars, and road hazards, NOT for trees!)
+                if (!isTree) {
+                    let rangePill = `RANGE: ${dist.toFixed(1)}m • ${ringRes}`;
+                    if (isPothole) {
+                        rangePill = `2.5D ELEVATION DEFICIT: -12cm • ${dist.toFixed(1)}m`;
+                    }
+                    ctx.font = '10px JetBrains Mono, monospace';
+                    const pillW = ctx.measureText(rangePill).width + 12;
+                    const pillY = Math.min(h * 0.85 - 20, by + bh + 4);
+                    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+                    ctx.fillRect(bx, pillY, pillW, 18);
+                    ctx.strokeStyle = strokeColor;
+                    ctx.strokeRect(bx, pillY, pillW, 18);
+                    ctx.fillStyle = '#f8fafc';
+                    ctx.fillText(rangePill, bx + 6, pillY + 13);
+                }
+            });
+        }
 
         // Real-time motion analysis (throttled internally) + debounced HUD labels.
         // Stable (hysteresis) state drives ALL text so the banner cannot flicker
@@ -1317,26 +1854,69 @@ class UnifiedTeleopEngine {
         const statHits = document.getElementById('stat-flow-hits');
         const statMaskRoi = document.getElementById('stat-mask-roi');
         const statMaskDescription = statMaskRoi ? statMaskRoi.nextElementSibling : null;
-        if (statMaskDescription) {
-            statMaskDescription.innerText = isWebcam
-                ? 'Top 35% and bottom 15% excluded by geometric ROI'
-                : 'Sky (35%) & hood (15%) excluded by synthetic road ROI';
-        }
 
-        const realCacheHitPct = Math.max(0, 100.0 - (analysis.motionRatio * 100)).toFixed(0);
-        const roiTrackingPct = analysis.motionDetected ? Math.min(65, 50 + Math.round(motionFactor * 15)) : 50;
+        // --- Fix 5: Simulator-driven real-time metrics ---
+        // When using the 3D simulator, derive spatial masking & optical flow
+        // from the actual detected objects rather than pixel motion analysis.
+        if (this.cameraSource === 'simulator' && window.threeSim) {
+            const simDetections = targetList || [];
+            const dynamicCount = simDetections.filter(d => d.label === 'person' || d.label === 'vehicle' || d.label === 'car').length;
+            const staticMasked = simDetections.filter(d => d.masked || d.label === 'tree').length;
+            const totalObj = simDetections.length;
 
-        if (analysis.motionDetected) {
-            const rangeTxt = bandMeta ? ` • ${bandMeta.tag}` : '';
-            const flowLabel = `${realCacheHitPct}% Cache Hits (Tracking${bandMeta ? ' ' + analysis.rangeBand.toUpperCase() : ''})`;
-            const maskLabel = `${roiTrackingPct}% ROI Active (Tracking${rangeTxt})`;
-            if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastFlowLabel = flowLabel; }
-            if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastMaskLabel = maskLabel; }
+            // Spatial masking: base 50% ROI + dynamic expansion per object in view
+            const simRoiPct = Math.min(72, 50 + dynamicCount * 5 + staticMasked * 2);
+            // Optical flow cache: high when scene is mostly static, drops with dynamics
+            const nearObjects = simDetections.filter(d => (d.dist || 100) <= 15).length;
+            const simCacheHitPct = Math.max(45, Math.min(98, 95 - dynamicCount * 8 - nearObjects * 5));
+
+            // Find dominant range band from nearest dynamic object
+            const nearestDynamic = simDetections
+                .filter(d => d.label === 'person' || d.label === 'vehicle' || d.label === 'car')
+                .sort((a, b) => (a.dist || 100) - (b.dist || 100))[0];
+            const simBand = nearestDynamic ? nearestDynamic.rangeBand : null;
+            const simBandMeta = simBand ? RANGE_META[simBand] : null;
+
+            if (statMaskDescription) {
+                statMaskDescription.innerText = `Sky (35%) & hood (15%) masked • ${totalObj} objects • ${dynamicCount} dynamic`;
+            }
+
+            if (dynamicCount > 0) {
+                const bandTag = simBandMeta ? ` ${simBand.toUpperCase()}` : '';
+                const flowLabel = `${simCacheHitPct}% Cache Hits (Tracking${bandTag})`;
+                const maskLabel = `${simRoiPct}% ROI Active (${dynamicCount} Dynamic${simBandMeta ? ' • ' + simBandMeta.tag : ''})`;
+                const labelColor = simBandMeta ? simBandMeta.color : '#f43f5e';
+                if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = labelColor; this._lastFlowLabel = flowLabel; }
+                if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = labelColor; this._lastMaskLabel = maskLabel; }
+            } else {
+                const flowLabel = `${simCacheHitPct}% Cache Hits (Static Scene${staticMasked > 0 ? ' • ' + staticMasked + ' Cached' : ''})`;
+                const maskLabel = `${simRoiPct}% ROI Retained (Static)`;
+                if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = 'var(--accent-green)'; this._lastFlowLabel = flowLabel; }
+                if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = 'var(--accent-green)'; this._lastMaskLabel = maskLabel; }
+            }
         } else {
-            const flowLabel = `${realCacheHitPct}% Cache Hits (Static)`;
-            const maskLabel = '50% ROI Retained (Static)';
-            if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = 'var(--accent-green)'; this._lastFlowLabel = flowLabel; }
-            if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = 'var(--accent-green)'; this._lastMaskLabel = maskLabel; }
+            // Webcam / Synthetic: use pixel-based motion analysis (original behavior)
+            if (statMaskDescription) {
+                statMaskDescription.innerText = isWebcam
+                    ? 'Top 35% and bottom 15% excluded by geometric ROI'
+                    : 'Sky (35%) & hood (15%) excluded by synthetic road ROI';
+            }
+
+            const realCacheHitPct = Math.max(0, 100.0 - (analysis.motionRatio * 100)).toFixed(0);
+            const roiTrackingPct = analysis.motionDetected ? Math.min(65, 50 + Math.round(motionFactor * 15)) : 50;
+
+            if (analysis.motionDetected) {
+                const rangeTxt = bandMeta ? ` • ${bandMeta.tag}` : '';
+                const flowLabel = `${realCacheHitPct}% Cache Hits (Tracking${bandMeta ? ' ' + analysis.rangeBand.toUpperCase() : ''})`;
+                const maskLabel = `${roiTrackingPct}% ROI Active (Tracking${rangeTxt})`;
+                if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastFlowLabel = flowLabel; }
+                if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = bandMeta ? bandMeta.color : '#f43f5e'; this._lastMaskLabel = maskLabel; }
+            } else {
+                const flowLabel = `${realCacheHitPct}% Cache Hits (Static)`;
+                const maskLabel = '50% ROI Retained (Static)';
+                if (statHits && flowLabel !== this._lastFlowLabel) { statHits.innerText = flowLabel; statHits.style.color = 'var(--accent-green)'; this._lastFlowLabel = flowLabel; }
+                if (statMaskRoi && maskLabel !== this._lastMaskLabel) { statMaskRoi.innerText = maskLabel; statMaskRoi.style.color = 'var(--accent-green)'; this._lastMaskLabel = maskLabel; }
+            }
         }
 
         // HUD range pill: explicit NEAR / MID / FAR readout for the tracked car.
@@ -1419,9 +1999,8 @@ class UnifiedTeleopEngine {
             ctx.fillStyle = '#3b82f6';
             ctx.font = 'bold 12px Inter, sans-serif';
             ctx.fillText('🔍 SEMANTIC SEARCH: NO PERSON / VEHICLE DETECTED (0 Objects)', w * 0.22 + 12, h * 0.52 + 22);
-        } else {
-            // Tracked-car box in its RANGE color — answers "which ring is the car in"
-            // at a glance. Label carries range + temporal confidence (master file).
+        } else if (this.cameraSource === 'webcam') {
+            // Tracked-car box ONLY for physical webcam bench mode (when YOLO is not active)
             const boxOpacity = analysis.boxOpacity ?? (analysis.motionDetected ? 1 : 0);
             if (boxOpacity > 0 && analysis.box) {
                 const b = analysis.box;
@@ -1460,52 +2039,547 @@ class UnifiedTeleopEngine {
             }
         }
 
-        // 3-Ring perspective bands drawn ON the road (trapezoids converging to the
-        // vanishing point) — near = bottom/wide, far = top/narrow. Colors match
-        // the Semantic Ring Legend: near cyan #38bdf8 / mid purple #c084fc /
-        // far orange #fb923c. The ACTIVE band (where the tracked car sits) is
-        // filled; the others stay outlines so the rings are actually useful.
-        const vpx = w * 0.5, vpy = h * 0.42;   // vanishing point
-        const yFar0 = h * 0.42, yFar1 = h * 0.52;   // FAR  30–100m
-        const yMid0 = h * 0.52, yMid1 = h * 0.68;   // MID  10–30m
-        const yNear0 = h * 0.68, yNear1 = h * 0.85; // NEAR  0–10m
-        const spreadAt = (y) => {
-            const t = Math.min(1, Math.max(0, (y - vpy) / Math.max(1, h * 0.85 - vpy)));
-            return 0.06 + t * 0.38;
-        };
-        const bandPath = (y0, y1) => {
-            const s0 = spreadAt(y0), s1 = spreadAt(y1);
-            ctx.beginPath();
-            ctx.moveTo(vpx - s0 * w, y0);
-            ctx.lineTo(vpx + s0 * w, y0);
-            ctx.lineTo(vpx + s1 * w, y1);
-            ctx.lineTo(vpx - s1 * w, y1);
-            ctx.closePath();
-        };
-        const activeBand = analysis.motionDetected ? analysis.rangeBand : null;
-        const bands = [
-            { key: 'far', y0: yFar0, y1: yFar1, color: '#fb923c', label: 'FAR 30–100m • 0.25x' },
-            { key: 'mid', y0: yMid0, y1: yMid1, color: '#c084fc', label: 'MID 10–30m • 0.5x' },
-            { key: 'near', y0: yNear0, y1: yNear1, color: '#38bdf8', label: 'NEAR 0–10m • 1.0x' },
-        ];
-        ctx.lineWidth = 1.5;
-        ctx.font = '11px Inter, sans-serif';
-        for (const bd of bands) {
-            bandPath(bd.y0, bd.y1);
-            if (activeBand === bd.key) {
-                ctx.fillStyle = bd.color + '2E'; // ~18% fill on the active band
-                ctx.fill();
-                ctx.strokeStyle = bd.color;
-                ctx.lineWidth = 2.5;
-                ctx.stroke();
-                ctx.lineWidth = 1.5;
-            } else {
-                ctx.strokeStyle = bd.color + 'AA';
-                ctx.stroke();
-            }
-            ctx.fillStyle = bd.key === activeBand ? bd.color : bd.color + 'CC';
-            ctx.fillText((bd.key === activeBand ? '▶ ' : '') + bd.label, vpx - spreadAt(bd.y1) * w + 6, (bd.y0 + bd.y1) / 2);
+    }
+
+    _drawSyntheticBenchmark(ctx, w, h) {
+        if (!this.syntheticState) {
+            this.syntheticState = {
+                scrollOffset: 0,
+                pedProgress: 0.28,
+                pedDir: 1,
+                pedWalkCycle: 0,
+                carProgress: 0.60,
+                cloudOffset: 0,
+                lastTime: performance.now()
+            };
         }
+        const state = this.syntheticState;
+        const now = performance.now();
+        const dt = Math.min(0.1, (now - state.lastTime) / 1000);
+        state.lastTime = now;
+
+        state.scrollOffset = (state.scrollOffset + 240 * dt) % 80;
+        state.cloudOffset = (state.cloudOffset + 12 * dt) % w;
+        state.pedProgress += 0.09 * state.pedDir * dt;
+        if (state.pedProgress > 0.78) {
+            state.pedProgress = 0.78;
+            state.pedDir = -1;
+        } else if (state.pedProgress < 0.22) {
+            state.pedProgress = 0.22;
+            state.pedDir = 1;
+        }
+        state.pedWalkCycle += 8.5 * dt;
+
+        state.carProgress += 0.08 * dt;
+        if (state.carProgress > 1.15) {
+            state.carProgress = 0.12;
+        }
+
+        // 1. Sky & Cyber Horizon
+        const vpY = h * 0.35;
+        const vpX = w * 0.5;
+
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, vpY);
+        skyGrad.addColorStop(0, '#030712');
+        skyGrad.addColorStop(0.65, '#0f172a');
+        skyGrad.addColorStop(1, '#1e1b4b');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, w, vpY);
+
+        // Drifting Volumetric Clouds
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        for (let c = 0; c < 5; c++) {
+            const cx = ((c * 220 + state.cloudOffset * 1.5) % (w + 160)) - 80;
+            const cy = 25 + (c * 22) % 65;
+            ctx.beginPath();
+            ctx.ellipse(cx, cy, 55, 18, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx + 25, cy - 8, 38, 22, 0, 0, Math.PI * 2);
+            ctx.ellipse(cx - 25, cy + 2, 42, 16, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Distant colorful city skyline along the horizon
+        const bldgCols = ['#0284c7', '#c2410c', '#1e3a8a', '#d97706', '#334155', '#0f766e'];
+        for (let bx = 0; bx < w; bx += 30) {
+            const bH = 22 + ((bx * 19) % 48);
+            const bCol = bldgCols[(bx / 30) % bldgCols.length];
+            ctx.fillStyle = bCol;
+            ctx.fillRect(bx, vpY - bH, 25, bH);
+            // Lit illuminated window rows
+            ctx.fillStyle = '#fef08a';
+            for (let wy = vpY - bH + 4; wy < vpY - 4; wy += 8) {
+                ctx.fillRect(bx + 4, wy, 5, 3);
+                ctx.fillRect(bx + 14, wy, 5, 3);
+            }
+            // Blinking antenna towers
+            if (bx % 60 === 0) {
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(bx + 12, vpY - bH);
+                ctx.lineTo(bx + 12, vpY - bH - 12);
+                ctx.stroke();
+                ctx.fillStyle = (Math.floor(now / 500) % 2 === 0) ? '#f43f5e' : '#fda4af';
+                ctx.beginPath();
+                ctx.arc(bx + 12, vpY - bH - 12, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // 2. Roadside Grass
+        const grassGrad = ctx.createLinearGradient(0, vpY, 0, h);
+        grassGrad.addColorStop(0, '#064e3b');
+        grassGrad.addColorStop(1, '#022c22');
+        ctx.fillStyle = grassGrad;
+        ctx.fillRect(0, vpY, w, h - vpY);
+
+        // 3. Road Surface (Dark Charcoal Asphalt)
+        ctx.beginPath();
+        ctx.moveTo(vpX - w * 0.06, vpY);
+        ctx.lineTo(vpX + w * 0.06, vpY);
+        ctx.lineTo(vpX + w * 0.44, h);
+        ctx.lineTo(vpX - w * 0.44, h);
+        ctx.closePath();
+        const roadGrad = ctx.createLinearGradient(0, vpY, 0, h);
+        roadGrad.addColorStop(0, '#1e293b');
+        roadGrad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = roadGrad;
+        ctx.fill();
+
+        // 4. Red & White Curbs
+        const curbSegments = 16;
+        for (let i = 0; i < curbSegments; i++) {
+            const t0 = i / curbSegments;
+            const t1 = (i + 1) / curbSegments;
+            const y0 = vpY + (h - vpY) * Math.pow(t0, 1.8);
+            const y1 = vpY + (h - vpY) * Math.pow(t1, 1.8);
+            const w0 = (w * 0.06) + (w * 0.38) * t0;
+            const w1 = (w * 0.06) + (w * 0.38) * t1;
+
+            const isRed = (i + Math.floor(state.scrollOffset / 20)) % 2 === 0;
+            ctx.fillStyle = isRed ? '#ef4444' : '#f8fafc';
+
+            // Left curb
+            ctx.beginPath();
+            ctx.moveTo(vpX - w0 - 10 * t0, y0);
+            ctx.lineTo(vpX - w0, y0);
+            ctx.lineTo(vpX - w1, y1);
+            ctx.lineTo(vpX - w1 - 10 * t1, y1);
+            ctx.closePath();
+            ctx.fill();
+
+            // Right curb
+            ctx.beginPath();
+            ctx.moveTo(vpX + w0, y0);
+            ctx.lineTo(vpX + w0 + 10 * t0, y0);
+            ctx.lineTo(vpX + w1 + 10 * t1, y1);
+            ctx.lineTo(vpX + w1, y1);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 5. Solid Edge Lines
+        ctx.strokeStyle = '#f8fafc';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(vpX - w * 0.05, vpY);
+        ctx.lineTo(vpX - w * 0.40, h);
+        ctx.moveTo(vpX + w * 0.05, vpY);
+        ctx.lineTo(vpX + w * 0.40, h);
+        ctx.stroke();
+
+        // 6. Scrolling Center Dashed Yellow Lines (Perspective)
+        const numDashes = 10;
+        ctx.strokeStyle = '#facc15';
+        for (let i = 0; i < numDashes; i++) {
+            const rawT = (i / numDashes) + (state.scrollOffset / (80 * numDashes));
+            const t = rawT % 1.0;
+            if (t < 0.08) continue;
+            const yStart = vpY + (h - vpY) * Math.pow(t, 2.0);
+            const yEnd = vpY + (h - vpY) * Math.pow(Math.min(1.0, t + 0.06), 2.0);
+            ctx.lineWidth = 1 + 6 * t;
+            ctx.beginPath();
+            ctx.moveTo(vpX, yStart);
+            ctx.lineTo(vpX, yEnd);
+            ctx.stroke();
+        }
+
+        // 6b. Scrolling Colorful Roadside Trees along Left and Right Flanks
+        const treeSpecies = [
+            { main: '#f59e0b', alt: '#d97706', label: 'Autumn Maple' },
+            { main: '#f472b6', alt: '#ec4899', label: 'Cherry Blossom' },
+            { main: '#a855f7', alt: '#8b5cf6', label: 'Jacaranda' },
+            { main: '#10b981', alt: '#059669', label: 'Blue Spruce' }
+        ];
+
+        const numTrees = 7;
+        for (let i = 0; i < numTrees; i++) {
+            const rawT = (i / numTrees) + (state.scrollOffset / (80 * numTrees));
+            const t = rawT % 1.0;
+            if (t < 0.12) continue;
+
+            const ty = vpY + (h - vpY) * Math.pow(t, 1.7);
+            const tScale = Math.pow(t, 1.6);
+            const treeW = (w * 0.06) + (w * 0.42) * t;
+            const specL = treeSpecies[(i * 2) % treeSpecies.length];
+            const specR = treeSpecies[(i * 2 + 1) % treeSpecies.length];
+
+            // Left Tree
+            const txL = vpX - treeW - 32 * tScale;
+            ctx.save();
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(txL - 2.5 * tScale, ty - 18 * tScale, 5 * tScale, 20 * tScale);
+            ctx.fillStyle = specL.main;
+            ctx.beginPath();
+            ctx.arc(txL, ty - 26 * tScale, 16 * tScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = specL.alt;
+            ctx.beginPath();
+            ctx.arc(txL - 6 * tScale, ty - 24 * tScale, 11 * tScale, 0, Math.PI * 2);
+            ctx.arc(txL + 6 * tScale, ty - 28 * tScale, 12 * tScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+
+            // Right Tree
+            const txR = vpX + treeW + 32 * tScale;
+            ctx.save();
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(txR - 2.5 * tScale, ty - 18 * tScale, 5 * tScale, 20 * tScale);
+            ctx.fillStyle = specR.main;
+            ctx.beginPath();
+            ctx.arc(txR, ty - 26 * tScale, 16 * tScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = specR.alt;
+            ctx.beginPath();
+            ctx.arc(txR + 6 * tScale, ty - 24 * tScale, 11 * tScale, 0, Math.PI * 2);
+            ctx.arc(txR - 6 * tScale, ty - 28 * tScale, 12 * tScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // 7. Zebra Crosswalk (Near Range ~ 8m)
+        const crossY0 = vpY + (h - vpY) * 0.58;
+        const crossY1 = vpY + (h - vpY) * 0.64;
+        ctx.fillStyle = 'rgba(248, 250, 252, 0.88)';
+        const crossStripes = 14;
+        for (let s = 0; s < crossStripes; s++) {
+            if (s % 2 === 0) continue;
+            const st = s / crossStripes;
+            const sx0 = (vpX - w * 0.26) + st * (w * 0.52);
+            const sx1 = (vpX - w * 0.28) + st * (w * 0.56);
+            ctx.beginPath();
+            ctx.moveTo(sx0 - 8, crossY0);
+            ctx.lineTo(sx0 + 8, crossY0);
+            ctx.lineTo(sx1 + 9, crossY1);
+            ctx.lineTo(sx1 - 9, crossY1);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 7b. Road Surface Pothole Hazard (2.5D Elevation Grid Deficit)
+        const potX = vpX + w * 0.16;
+        const potY = vpY + (h - vpY) * 0.74;
+        ctx.save();
+        // Outer pulsing hazard halo
+        ctx.strokeStyle = 'rgba(244, 63, 94, 0.85)';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.ellipse(potX, potY, 38, 17, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Depressed crater
+        ctx.fillStyle = '#05070a';
+        ctx.beginPath();
+        ctx.ellipse(potX, potY, 32, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Fractured rim
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Negative elevation drop indicators (-12cm)
+        ctx.strokeStyle = '#f43f5e';
+        ctx.lineWidth = 1.5;
+        for (let di = -16; di <= 16; di += 8) {
+            ctx.beginPath();
+            ctx.moveTo(potX + di, potY - 4);
+            ctx.lineTo(potX + di, potY + 8);
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#f43f5e';
+        ctx.font = 'bold 10px JetBrains Mono, monospace';
+        ctx.fillText('🕳️ -12cm DEPTH', potX - 38, potY + 30);
+        ctx.restore();
+
+        // 8. Oncoming / Preceding Vehicle (Detailed Sports Car Model with Headlight Glow)
+        const carT = Math.min(1.0, state.carProgress);
+        const carScale = Math.pow(carT, 1.6);
+        const carSuspension = Math.sin(now * 0.018) * 1.5 * carScale;
+        const carY = vpY + (h - vpY) * (0.15 + 0.55 * carScale) + carSuspension;
+        const carX = vpX - (w * 0.16 * carScale);
+        const carW = Math.max(28, 122 * carScale);
+        const carH = Math.max(18, 72 * carScale);
+
+        ctx.save();
+        // Projected Headlight Beam Cones on Road Asphalt
+        ctx.fillStyle = 'rgba(254, 240, 138, 0.16)';
+        ctx.beginPath();
+        ctx.moveTo(carX - carW * 0.38, carY + carH * 0.2);
+        ctx.lineTo(carX - carW * 0.85, carY + carH * 1.6);
+        ctx.lineTo(carX - carW * 0.05, carY + carH * 1.6);
+        ctx.lineTo(carX - carW * 0.28, carY + carH * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(carX + carW * 0.28, carY + carH * 0.2);
+        ctx.lineTo(carX + carW * 0.05, carY + carH * 1.6);
+        ctx.lineTo(carX + carW * 0.85, carY + carH * 1.6);
+        ctx.lineTo(carX + carW * 0.38, carY + carH * 0.2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Vehicle Shadow
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.70)';
+        ctx.beginPath();
+        ctx.ellipse(carX, carY + carH * 0.45, carW * 0.55, carH * 0.22, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Vehicle Body (Aerodynamic Cyber Teal Sedan)
+        const carGrad = ctx.createLinearGradient(carX - carW * 0.5, carY, carX + carW * 0.5, carY);
+        carGrad.addColorStop(0, '#0369a1');
+        carGrad.addColorStop(0.5, '#0284c7');
+        carGrad.addColorStop(1, '#0369a1');
+        ctx.fillStyle = carGrad;
+        ctx.beginPath();
+        ctx.roundRect(carX - carW * 0.5, carY - carH * 0.1, carW, carH * 0.55, 6 * carScale);
+        ctx.fill();
+
+        // Vehicle Cabin / Roof
+        ctx.fillStyle = '#0f172a';
+        ctx.beginPath();
+        ctx.roundRect(carX - carW * 0.38, carY - carH * 0.5, carW * 0.76, carH * 0.45, 4 * carScale);
+        ctx.fill();
+
+        // Windshield Glass with Cyan Tint
+        ctx.fillStyle = '#38bdf8';
+        ctx.beginPath();
+        ctx.roundRect(carX - carW * 0.32, carY - carH * 0.44, carW * 0.64, carH * 0.35, 3 * carScale);
+        ctx.fill();
+
+        // Dual Projector Headlights (Radiant LED White/Amber Bloom)
+        ctx.fillStyle = '#fef08a';
+        ctx.shadowColor = '#fef08a';
+        ctx.shadowBlur = 14 * carScale;
+        ctx.fillRect(carX - carW * 0.46, carY + carH * 0.05, carW * 0.18, carH * 0.15);
+        ctx.fillRect(carX + carW * 0.28, carY + carH * 0.05, carW * 0.18, carH * 0.15);
+        ctx.shadowBlur = 0;
+
+        // Front Radiator Grille & LiDAR Puck
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(carX - carW * 0.22, carY + carH * 0.08, carW * 0.44, carH * 0.18);
+        ctx.fillStyle = '#00f0ff';
+        ctx.beginPath();
+        ctx.arc(carX, carY - carH * 0.52, 3.5 * carScale, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Tires
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(carX - carW * 0.52, carY + carH * 0.24, carW * 0.14, carH * 0.32);
+        ctx.fillRect(carX + carW * 0.38, carY + carH * 0.24, carW * 0.14, carH * 0.32);
+        ctx.restore();
+
+        // 9. Crossing Pedestrian with Direction-Aware Heading (Forward vs Reverse Walk Cycle)
+        const pedY = vpY + (h - vpY) * 0.62;
+        const pedX = (vpX - w * 0.28) + state.pedProgress * (w * 0.56);
+        const facingRight = state.pedDir > 0;
+
+        ctx.save();
+        // Pedestrian Shadow
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
+        ctx.beginPath();
+        ctx.ellipse(pedX, pedY + 38, 16, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const stride = Math.sin(state.pedWalkCycle) * 12;
+
+        // Legs & Shoes (dark trousers + white sneakers)
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 5.5;
+        ctx.beginPath();
+        ctx.moveTo(pedX - 3, pedY + 12);
+        ctx.lineTo(pedX - 4 + stride, pedY + 36);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pedX + 3, pedY + 12);
+        ctx.lineTo(pedX + 4 - stride, pedY + 36);
+        ctx.stroke();
+
+        // Shoes
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(pedX - 7 + stride + (facingRight ? 0 : -3), pedY + 35, 9, 4);
+        ctx.fillRect(pedX + 1 - stride + (facingRight ? 0 : -3), pedY + 35, 9, 4);
+
+        // Torso / High-Vis Safety Jacket
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.roundRect(pedX - 10, pedY - 18, 20, 30, 4);
+        ctx.fill();
+
+        // Reflective Safety Stripe
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(pedX - 10, pedY - 4, 20, 4);
+
+        // Backpack on back (placed opposite of walking direction)
+        ctx.fillStyle = '#1e3a8a';
+        const bpX = facingRight ? pedX - 12 : pedX + 6;
+        ctx.beginPath();
+        ctx.roundRect(bpX, pedY - 14, 6, 18, 2);
+        ctx.fill();
+
+        // Arms (swinging counter-stride)
+        ctx.strokeStyle = '#d97706';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(pedX - 9, pedY - 14);
+        ctx.lineTo(pedX - 12 - stride * 0.7, pedY + 6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(pedX + 9, pedY - 14);
+        ctx.lineTo(pedX + 12 + stride * 0.7, pedY + 6);
+        ctx.stroke();
+
+        // Head with baseball cap visor facing the walk direction!
+        ctx.fillStyle = '#fde68a';
+        ctx.beginPath();
+        ctx.arc(pedX, pedY - 26, 7.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cap & Visor pointing in walking direction
+        ctx.fillStyle = '#0284c7';
+        ctx.beginPath();
+        ctx.arc(pedX, pedY - 29, 7.5, Math.PI, 0);
+        ctx.fill();
+        ctx.fillRect(facingRight ? pedX : pedX - 10, pedY - 29, 10, 3);
+
+        ctx.restore();
+
+        // 10. Watermark & Telemetry Badge
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
+        ctx.fillRect(16, h - 38, 390, 26);
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(16, h - 38, 390, 26);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 11px JetBrains Mono, monospace';
+        ctx.fillText('🤖 2D SYNTHETIC BENCHMARK • DYNAMIC PARALLAX • 60 FPS', 24, h - 21);
+    }
+
+    _getSyntheticDetectedObjects(w, h) {
+        if (!this.syntheticState) {
+            return [];
+        }
+        const state = this.syntheticState;
+        const vpY = h * 0.35;
+        const vpX = w * 0.5;
+
+        // Pedestrian Target (Crossing at ~8.2m inside Ring 0)
+        const pedY = vpY + (h - vpY) * 0.62;
+        const pedX = (vpX - w * 0.28) + state.pedProgress * (w * 0.56);
+        const pedDist = 8.2;
+
+        const pedObj = {
+            label: 'person',
+            dist: pedDist,
+            ringId: 0,
+            rangeBand: 'near',
+            resolution: '5cm',
+            confidence: 0.97,
+            bearing01: pedX / w,
+            box: {
+                x: pedX / w,
+                y: (pedY - 2) / h,
+                w: 48,
+                h: 96
+            }
+        };
+
+        // Vehicle Target
+        const carT = Math.min(1.0, state.carProgress);
+        const carScale = Math.pow(carT, 1.6);
+        const carY = vpY + (h - vpY) * (0.15 + 0.55 * carScale);
+        const carX = vpX - (w * 0.16 * carScale);
+        const carDist = Math.max(6.0, (1.1 - carScale) * 38 + 6.0);
+        const carW = Math.max(32, 130 * carScale);
+        const carH = Math.max(22, 75 * carScale);
+
+        let carRing = 1;
+        let carBand = 'mid';
+        let carRes = '15cm';
+        if (carDist <= 10.0) {
+            carRing = 0; carBand = 'near'; carRes = '5cm';
+        } else if (carDist > 30.0) {
+            carRing = 2; carBand = 'far'; carRes = '50cm';
+        }
+
+        const carObj = {
+            label: 'car',
+            dist: carDist,
+            ringId: carRing,
+            rangeBand: carBand,
+            resolution: carRes,
+            confidence: 0.94,
+            bearing01: carX / w,
+            box: {
+                x: carX / w,
+                y: carY / h,
+                w: carW + 12,
+                h: carH + 16
+            }
+        };
+
+        // 2.5D Elevation Hazard Pothole Target (at ~14.8m inside Ring 1)
+        const potX = vpX + w * 0.16;
+        const potY = vpY + (h - vpY) * 0.74;
+        const potholeObj = {
+            label: 'pothole',
+            dist: 14.8,
+            ringId: 1,
+            rangeBand: 'mid',
+            resolution: '15cm',
+            confidence: 0.96,
+            depth: '-12cm',
+            bearing01: potX / w,
+            box: {
+                x: potX / w,
+                y: potY / h,
+                w: 76,
+                h: 42
+            }
+        };
+
+        // Roadside Tree Target (Static Scene Masking)
+        const treeObj = {
+            label: 'tree',
+            dist: 14.5,
+            ringId: 1,
+            rangeBand: 'mid',
+            resolution: '15cm',
+            confidence: 0.98,
+            masked: true,
+            maskType: 'Static Scene / Vegetation Caching',
+            bearing01: 0.17,
+            box: {
+                x: 0.17,
+                y: 0.52,
+                w: 68,
+                h: 96
+            }
+        };
+
+        return [pedObj, carObj, potholeObj, treeObj];
     }
 }
 
@@ -1775,7 +2849,8 @@ function initHeroPreviewCanvas() {
 
 function setDashboardView(mode) {
     document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
-    const targetBtn = document.getElementById(`btn-view-${mode}`);
+    const btnId = mode === 'camera' ? 'btn-view-cam' : (mode === 'sim3d' ? 'btn-view-sim' : `btn-view-${mode}`);
+    const targetBtn = document.getElementById(btnId);
     if (targetBtn) targetBtn.classList.add('active');
     if (engineInstance) {
         engineInstance.setViewMode(mode);

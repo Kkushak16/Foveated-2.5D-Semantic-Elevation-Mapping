@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIH Presentation Speech — Foveated 2.5D LiDAR Perception</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-card: rgba(20, 27, 45, 0.85);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --accent: #38bdf8;
+      --accent-grad: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --quote-bg: rgba(56, 189, 248, 0.06);
+      --quote-border: #38bdf8;
+      --tag-bg: rgba(99, 102, 241, 0.15);
+      --tag-text: #a5b4fc;
+      --green: #4ade80;
+      --yellow: #facc15;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      line-height: 1.65;
+      padding: 2.5rem 1.5rem;
+      display: flex;
+      justify-content: center;
+    }
+
+    .container {
+      max-width: 860px;
+      width: 100%;
+    }
+
+    .action-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .btn-print {
+      background: var(--accent-grad);
+      color: #0b0f19;
+      font-weight: 700;
+      font-size: 0.9rem;
+      padding: 0.65rem 1.3rem;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    .btn-print:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .header-badge {
+      display: inline-block;
+      padding: 0.35rem 0.85rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: var(--tag-bg);
+      color: var(--tag-text);
+      border-radius: 9999px;
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 0.75rem;
+      background: linear-gradient(to right, #ffffff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 1.75rem;
+      margin-bottom: 2rem;
+      backdrop-filter: blur(12px);
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin: 1.2rem 0 0.5rem 0;
+    }
+
+    .speech-box {
+      background: var(--quote-bg);
+      border-left: 4px solid var(--quote-border);
+      padding: 1.2rem 1.4rem;
+      border-radius: 0 10px 10px 0;
+      margin: 1rem 0;
+      font-size: 1.02rem;
+      color: #e2e8f0;
+      line-height: 1.7;
+    }
+
+    .time-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: #38bdf8;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      display: block;
+    }
+
+    ul, ol {
+      padding-left: 1.5rem;
+      margin: 0.75rem 0;
+    }
+
+    li {
+      margin-bottom: 0.45rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.25rem 0;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      padding: 0.75rem 0.9rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    th {
+      background: rgba(255, 255, 255, 0.03);
+      color: #38bdf8;
+      font-weight: 600;
+    }
+
+    .pro-tip {
+      background: rgba(74, 222, 128, 0.08);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      margin-top: 1rem;
+    }
+
+    .pro-tip-title {
+      color: var(--green);
+      font-weight: 700;
+      font-size: 0.9rem;
+      margin-bottom: 0.35rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* Print Styles for PDF export */
+    @media print {
+      body {
+        background: #ffffff !important;
+        color: #111827 !important;
+        padding: 0.5in !important;
+      }
+      .action-bar, .btn-print {
+        display: none !important;
+      }
+      .card {
+        background: transparent !important;
+        border: 1px solid #e5e7eb !important;
+        box-shadow: none !important;
+        page-break-inside: avoid;
+        margin-bottom: 1.2rem !important;
+        padding: 1rem !important;
+      }
+      h1 {
+        color: #111827 !important;
+        -webkit-text-fill-color: initial !important;
+        font-size: 1.6rem !important;
+      }
+      h2 {
+        color: #1d4ed8 !important;
+        font-size: 1.2rem !important;
+      }
+      .speech-box {
+        background: #f8fafc !important;
+        border-left: 4px solid #2563eb !important;
+        color: #1f2937 !important;
+      }
+      table th {
+        background: #f3f4f6 !important;
+        color: #111827 !important;
+      }
+      table td {
+        border-bottom: 1px solid #e5e7eb !important;
+        color: #374151 !important;
+      }
+      .time-tag {
+        color: #2563eb !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="action-bar">
+      <div>
+        <span class="header-badge">Smart India Hackathon (SIH)</span>
+        <div style="font-size: 0.85rem; color: var(--text-muted);">Print-Ready Speech & Q&A Reference</div>
+      </div>
+      <button class="btn-print" onclick="window.print()">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+        </svg>
+        Save as PDF / Print
+      </button>
+    </div>
+
+    <h1>Foveated 2.5D LiDAR Perception System</h1>
+    <div class="subtitle">
+      Opening Speech Guide &mdash; Simple, High-Impact Presentation for SIH Evaluators
+    </div>
+
+    <!-- MAIN SPEECH CARD -->
+    <div class="card">
+      <h2>🎙️ Option 1: Main 2–3 Minute Presentation Speech</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+        Recommended for main jury round before turning to the live dashboard demo.
+      </p>
+
+      <div class="speech-box">
+        <span class="time-tag">[0:00 - 0:30] &bull; The Hook (Relatable Human Analogy)</span>
+        "Respected judges, evaluators, and mentors, a very warm good morning/afternoon to all of you.<br><br>
+        Picture yourself driving a car on an Indian road. Where are your eyes focusing? 
+        You are not examining every single leaf on a tree 100 meters away with high-definition clarity. Instead, your eyes are laser-focused on the 10 meters directly in front of your bumper &mdash; spotting potholes, sudden speed breakers, an open manhole, or a stray dog. Meanwhile, your peripheral vision is only keeping general track of the road boundary ahead.<br><br>
+        Nature designed human vision to be <strong>foveated</strong> &mdash; razor-sharp where immediate decisions happen, and lightweight everywhere else.<br><br>
+        Unfortunately, today's autonomous vehicles and robotic systems do the exact opposite."
+      </div>
+
+      <div class="speech-box">
+        <span class="time-tag">[0:30 - 1:15] &bull; The Problem Statement</span>
+        "Modern autonomous vehicles rely on 3D LiDAR sensors that spray out <strong>over 1 million laser points every single second</strong>.<br><br>
+        Right now, engineers are trapped between two broken extremes:
+        <ol style="margin-top: 0.5rem;">
+          <li><strong>If they flatten everything into a 2D map:</strong> The vehicle saves computing power, but becomes blind to height. It cannot tell the difference between a flat road marking, a 15-centimeter curb, a pothole, or a low overhead bridge.</li>
+          <li><strong>If they process full 3D voxels:</strong> The onboard computer is crushed under heavy data. On realistic, affordable edge hardware &mdash; like an NVIDIA Jetson or standard CPU &mdash; this causes thermal throttling, battery drain, and dangerous processing delays. At 40 km/h, a half-second computing lag can be fatal.</li>
+        </ol>"
+      </div>
+
+      <div class="speech-box">
+        <span class="time-tag">[1:15 - 2:00] &bull; The Solution (Foveated 2.5D Architecture)</span>
+        "To break this compromise, our team developed the <strong>Foveated 2.5D Semantic LiDAR Grid Mapping Engine</strong>.<br><br>
+        Instead of treating all space equally or running heavy, power-hungry neural networks, our algorithm mirrors the human eye through <strong>three concentric perception rings</strong>:
+        <ul style="margin-top: 0.5rem;">
+          <li><strong>Inner Ring (0 to 10 m):</strong> Processed at ultra-high <strong>5 cm resolution</strong> to capture road curbs, potholes, wheel clearance, and ground hazards.</li>
+          <li><strong>Mid Ring (10 to 30 m):</strong> Processed at <strong>15 cm resolution</strong> to track dynamic moving obstacles like pedestrians, cyclists, and cars.</li>
+          <li><strong>Far Ring (30 to 100 m):</strong> Processed at <strong>50 cm coarse resolution</strong> for macro-terrain and road path planning.</li>
+        </ul>"
+      </div>
+
+      <div class="speech-box">
+        <span class="time-tag">[2:00 - 2:30] &bull; Real-World Impact & Transition to Demo</span>
+        "By moving to this adaptive 2.5D foveated architecture:
+        <ul style="margin-top: 0.5rem;">
+          <li>We slash memory consumption by <strong>over 80%</strong>,</li>
+          <li>Reduce GPU inference overhead by <strong>nearly 79%</strong>, and</li>
+          <li>Run the entire perception pipeline at <strong>up to 72 FPS (&lt; 2 ms grid ingest)</strong> on a standard CPU.</li>
+        </ul>
+        This brings life-saving 3D terrain awareness to affordable last-mile delivery rovers, mining rovers, warehouse AGVs, and electric vehicles.<br><br>
+        Now, we would love to show you our live dual-sensor telemetry dashboard in action."
+      </div>
+    </div>
+
+    <!-- ELEVATOR PITCH -->
+    <div class="card">
+      <h2>⚡ Option 2: 60-Second "Elevator Pitch"</h2>
+      <div class="speech-box">
+        "Respected judges, autonomous rovers and vehicles face a fundamental dilemma: <strong>3D LiDAR sensors produce millions of data points every second.</strong><br><br>
+        If you flatten it into a 2D map, the vehicle is blind to potholes, curbs, and bridge heights. If you process heavy 3D point clouds, it requires expensive supercomputers and overheats budget edge devices.<br><br>
+        Our project solves this through <strong>human-inspired Foveated 2.5D Mapping</strong>.<br><br>
+        Just like the human eye focuses sharply on the road right ahead while keeping the horizon in coarse peripheral vision, our system divides the environment into three adaptive rings:
+        <strong>5 cm precision</strong> near the wheels for potholes and curbs, <strong>15 cm precision</strong> for moving vehicles, and <strong>50 cm precision</strong> for distant terrain.<br><br>
+        <strong>The result?</strong> We reduce memory and compute overhead by over <strong>80%</strong>, running at <strong>real-time 72 FPS</strong> on low-cost edge processors without requiring expensive GPUs.<br><br>
+        Let us show you our live teleoperation dashboard."
+      </div>
+    </div>
+
+    <!-- COMPARISON TABLE -->
+    <div class="card">
+      <h2>📊 Quick Technical Comparison Table</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>2D Flat Costmap</th>
+            <th>3D Voxel Grid</th>
+            <th>⭐ Our 2.5D Foveated Grid</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Pothole & Curb Awareness</strong></td>
+            <td>❌ Blind (No height)</td>
+            <td>✅ High</td>
+            <td><strong style="color: var(--green);">✅ Yes (True Elevation Z)</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Bridges & Overhangs</strong></td>
+            <td>❌ Collapses height</td>
+            <td>✅ Handled</td>
+            <td><strong style="color: var(--green);">✅ Yes (Min/Max Z Clearance)</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Memory Footprint</strong></td>
+            <td>Low (O(N²))</td>
+            <td>❌ Huge (O(N³))</td>
+            <td><strong style="color: var(--green);">✅ ~82% Reduction (O(N²))</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Pipeline Latency</strong></td>
+            <td>Fast (~5ms)</td>
+            <td>❌ Slow (50–200ms)</td>
+            <td><strong style="color: var(--green);">✅ &lt; 2ms Ingest / 72 FPS</strong></td>
+          </tr>
+          <tr>
+            <td><strong>Edge Feasibility</strong></td>
+            <td>✅ Yes</td>
+            <td>❌ Needs bulky GPUs</td>
+            <td><strong style="color: var(--green);">✅ Jetson & Standard CPU</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- QUESTIONS CHEAT SHEET -->
+    <div class="card">
+      <h2>🙋 Jury Q&A Cheat Sheet (Short & Punchy)</h2>
+      <div style="margin-bottom: 1rem;">
+        <strong style="color: #38bdf8;">Q: "What exactly does 2.5D mean in simple words?"</strong>
+        <p style="margin-top: 0.25rem;"><em>"A standard 2D map only knows if a cell is free or blocked. Full 3D stacks voxels everywhere, wasting memory. Our 2.5D stores ground height, obstacle height, and slope inside a lightweight 2D array &mdash; giving full 3D obstacle awareness at 2D computational speed."</em></p>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <strong style="color: #38bdf8;">Q: "Why not use a heavy AI deep-learning model?"</strong>
+        <p style="margin-top: 0.25rem;"><em>"Deep learning on 3D point clouds demands 100+ watts of GPU power and causes thermal throttling on robots. Our geometry-first pipeline runs deterministically in &lt; 2 ms on low-power edge CPUs, saving battery and manufacturing cost."</em></p>
+      </div>
+      <div>
+        <strong style="color: #38bdf8;">Q: "Where is this relevant in India?"</strong>
+        <p style="margin-top: 0.25rem;"><em>"Indian roads feature unstructured terrain: irregular curbs, potholes, and mixed traffic. This makes 2.5D elevation awareness crucial for autonomous delivery rovers, mining vehicles, and ADAS systems."</em></p>
+      </div>
+
+      <div class="pro-tip">
+        <div class="pro-tip-title">
+          <span>💡</span> Pro-Tip for SIH Presentation
+        </div>
+        <div>Keep one teammate dedicated to speaking, one to live dashboard interaction (showing the 3 rings and FPS metrics), and one to handle code and algorithmic depth questions.</div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
