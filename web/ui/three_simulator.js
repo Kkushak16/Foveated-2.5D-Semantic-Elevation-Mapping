@@ -45,7 +45,8 @@
                 canvas: this.canvas,
                 antialias: true,
                 alpha: false,
-                powerPreference: 'high-performance'
+                powerPreference: 'high-performance',
+                preserveDrawingBuffer: true
             });
             this.renderer.setPixelRatio(dpr);
             this.renderer.setSize(this.width, this.height, true);
@@ -67,17 +68,8 @@
             this.userCamera = new THREE.PerspectiveCamera(60, this.width / this.height, 0.2, 450);
             this.userCamera.position.set(-28, 6.5, 60);
 
-            // 720p HD Windshield Sensor Camera
-            this.windshieldCam = new THREE.PerspectiveCamera(66, 16 / 9, 0.1, 180);
-            this.windshieldTarget = new THREE.WebGLRenderTarget(1280, 720, {
-                minFilter: THREE.LinearFilter,
-                magFilter: THREE.LinearFilter,
-                format: THREE.RGBAFormat
-            });
-            this.offscreenCanvas = document.createElement('canvas');
-            this.offscreenCanvas.width = 1280;
-            this.offscreenCanvas.height = 720;
-            this.offscreenCtx = this.offscreenCanvas.getContext('2d');
+            // High-Performance Zero-Copy Windshield Sensor Camera
+            this.windshieldCam = new THREE.PerspectiveCamera(66, this.width / this.height, 0.1, 180);
 
             // --- Ego Vehicle State ---
             this.ego = {
@@ -2277,34 +2269,15 @@
             if (this.ego.lidarRingsGroup) this.ego.lidarRingsGroup.visible = false;
             if (this.ego.lidarSweep) this.ego.lidarSweep.visible = false;
 
-            const curTarget = this.renderer.getRenderTarget();
-            this.renderer.setRenderTarget(this.windshieldTarget);
+            // Direct GPU rendering to this.canvas: ZERO CPU buffer readback, ZERO pipeline stalls!
+            this.renderer.setRenderTarget(null);
             this.renderer.render(this.scene, this.windshieldCam);
-            this.renderer.setRenderTarget(curTarget);
 
             if (this.ego.mesh) this.ego.mesh.visible = egoMeshVis;
             if (this.ego.lidarRingsGroup) this.ego.lidarRingsGroup.visible = ringsVis;
             if (this.ego.lidarSweep) this.ego.lidarSweep.visible = sweepVis;
 
-            const w = this.windshieldTarget.width;
-            const h = this.windshieldTarget.height;
-
-            if (!this._pixelBuf || this._pixelBuf.length !== w * h * 4) {
-                this._pixelBuf = new Uint8Array(w * h * 4);
-                this._imgData = this.offscreenCtx.createImageData(w, h);
-            }
-
-            this.renderer.readRenderTargetPixels(this.windshieldTarget, 0, 0, w, h, this._pixelBuf);
-
-            const data = this._imgData.data;
-            for (let y = 0; y < h; y++) {
-                const srcRow = (h - 1 - y) * w * 4;
-                const dstRow = y * w * 4;
-                data.set(this._pixelBuf.subarray(srcRow, srcRow + w * 4), dstRow);
-            }
-            this.offscreenCtx.putImageData(this._imgData, 0, 0);
-
-            return this.offscreenCanvas;
+            return this.canvas;
         }
 
         getDetectedObjects() {
@@ -2437,6 +2410,8 @@
             this.renderer.setSize(width, height, false);
             const aspect = width / height;
             this.userCamera.aspect = aspect;
+            this.windshieldCam.aspect = aspect;
+            this.windshieldCam.updateProjectionMatrix();
 
             // Adaptive FOV: if aspect is narrow (e.g. dual split screen < 1.3), expand vertical FOV
             // to keep the entire highway, sidewalks, roadside trees, and city skyline fully visible!

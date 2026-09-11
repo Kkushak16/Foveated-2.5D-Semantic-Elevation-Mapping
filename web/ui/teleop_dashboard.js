@@ -958,8 +958,8 @@ class UnifiedTeleopEngine {
             this.runSemanticVision();
         }
 
-        // Render 3D simulation canvas when active
-        if (window.threeSim && (this.viewMode === 'sim3d' || this.viewMode === 'dual')) {
+        // Render 3D simulation canvas when in 3D simulator view
+        if (window.threeSim && this.viewMode === 'sim3d') {
             window.threeSim.render();
         }
 
@@ -1840,11 +1840,16 @@ class UnifiedTeleopEngine {
             });
         }
 
-        // Real-time motion analysis (throttled internally) + debounced HUD labels.
-        // Stable (hysteresis) state drives ALL text so the banner cannot flicker
-        // STATIC<->TRACKING on every frame while something moves.
-        const egoSpeed = this.motionMode === 'circular' ? 1.0 : 0.0;
-        const analysis = this.motionAnalyzer.analyze(sourceElem, w, h, 0.35, 0.85, egoSpeed);
+        // Real-time motion analysis:
+        // For simulator source, metrics are already derived directly from 3D physics actors with 0 CPU overhead.
+        // For webcam/synthetic sources, run the pixel motion analyzer.
+        let analysis;
+        if (this.cameraSource === 'simulator') {
+            analysis = this.motionAnalyzer._lastResult || { motionDetected: false, motionRatio: 0, rangeBand: null };
+        } else {
+            const egoSpeed = this.motionMode === 'circular' ? 1.0 : 0.0;
+            analysis = this.motionAnalyzer.analyze(sourceElem, w, h, 0.35, 0.85, egoSpeed);
+        }
 
         // motionFactor scaled *6 (was *15 — caused huge overreaction to tiny motion)
         const motionFactor = Math.min(1.0, analysis.motionRatio * 6);
