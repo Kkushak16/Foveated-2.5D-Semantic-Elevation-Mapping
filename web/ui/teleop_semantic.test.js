@@ -108,3 +108,59 @@ test('range band helper returns near/mid/far monotonic with size', () => {
     assert.ok(['near', 'mid', 'far'].includes(near), `near=${near}`);
     assert.ok(['near', 'mid', 'far'].includes(far), `far=${far}`);
 });
+
+test('unifies face and gesturing hands/fingers into EXACTLY 1 person with stable ID', () => {
+    const sv = createSemanticHarness();
+    const w = 240, h = 135;
+    // Single seated person: face at cx=120, hand/fingers at cx=140
+    const frame = solidFrame(w, h, (buf, W, H) => {
+        const cx = Math.floor(W * 0.5);
+        // Face skin blob
+        for (let dy = 0; dy < 14; dy++) {
+            for (let dx = -8; dx <= 8; dx++) {
+                setPixel(buf, W, cx + dx, Math.floor(H * 0.25) + dy, 220, 150, 120);
+            }
+        }
+        // Torso / shirt
+        for (let dy = 14; dy < 45; dy++) {
+            for (let dx = -14; dx <= 14; dx++) {
+                setPixel(buf, W, cx + dx, Math.floor(H * 0.25) + dy, 40, 50, 60);
+            }
+        }
+        // Hand / fingers skin blob slightly to the right
+        for (let dy = 20; dy < 30; dy++) {
+            for (let dx = 14; dx <= 23; dx++) {
+                setPixel(buf, W, cx + dx, Math.floor(H * 0.25) + dy, 220, 150, 120);
+            }
+        }
+    });
+
+    sv.analyzeLocal(frame, w, h);
+    const persons1 = sv.localObjects.filter(o => o.label === 'person');
+    assert.equal(persons1.length, 1, `expected exactly 1 person, got ${persons1.length}`);
+    assert.equal(persons1[0].id, 1, `expected person ID 1, got ${persons1[0].id}`);
+
+    // Second frame: person ID must remain 1
+    sv.analyzeLocal(frame, w, h);
+    const persons2 = sv.localObjects.filter(o => o.label === 'person');
+    assert.equal(persons2.length, 1, `expected still exactly 1 person, got ${persons2.length}`);
+    assert.equal(persons2[0].id, 1, `expected stable person ID 1 across frames, got ${persons2[0].id}`);
+});
+
+test('does NOT detect a flat wall or ambient room shadow as a vehicle', () => {
+    const sv = createSemanticHarness();
+    const w = 240, h = 135;
+    // Flat wall with ambient shadow in lower area (typical room background)
+    const frame = solidFrame(w, h, (buf, W, H) => {
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const shadow = (y > H * 0.4 && y < H * 0.8) ? 65 : 78;
+                setPixel(buf, W, x, y, shadow, shadow, shadow);
+            }
+        }
+    });
+
+    sv.analyzeLocal(frame, w, h);
+    const vehicles = sv.localObjects.filter(o => o.label === 'vehicle');
+    assert.equal(vehicles.length, 0, `expected 0 vehicles on a flat wall, got ${vehicles.length}`);
+});

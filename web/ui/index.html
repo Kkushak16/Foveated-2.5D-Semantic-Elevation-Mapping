@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lidar Perception — Real-Time 2.5D Foveated LiDAR & Camera Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -91,8 +91,8 @@
                 <!-- Metric Badges Row -->
                 <div class="hero-metrics-row">
                     <div class="metric-pill">
-                        <span class="pill-value">72.3 FPS</span>
-                        <span class="pill-label">Live Benchmark Ingest</span>
+                        <span class="pill-value">60.0 FPS</span>
+                        <span class="pill-label">Real-Time 60Hz Stream</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-pill">
@@ -389,8 +389,8 @@ void process_scan(const FoveatedPointBuffer& scan) {
                 <div class="metric-grid">
                     <div class="metric-card">
                         <div class="metric-label">Pipeline Throughput</div>
-                        <div class="metric-val" id="stat-fps">72.3 FPS</div>
-                        <div class="metric-sub" id="stat-fps-sub">Live GPU Benchmark</div>
+                        <div class="metric-val" id="stat-fps">60.0 FPS</div>
+                        <div class="metric-sub" id="stat-fps-sub">Real-Time 60Hz Target</div>
                     </div>
 
                     <div class="metric-card">
@@ -544,7 +544,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
     </div>
 
     <script src="three.min.js"></script>
-    <script src="three_simulator.js?v=21"></script>
-    <script src="teleop_dashboard.js?v=21"></script>
+    <script src="three_simulator.js?v=22"></script>
+    <script src="teleop_dashboard.js?v=22"></script>
 </body>
 </html>

@@ -40,7 +40,7 @@
             this.height = this.canvas.clientHeight || 600;
 
             // --- High-Resolution WebGL Renderer ---
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
             this.renderer = new THREE.WebGLRenderer({
                 canvas: this.canvas,
                 antialias: true,
@@ -105,6 +105,7 @@
             this.autopilot = true;
             this.keys = { forward: false, backward: false, left: false, right: false, brake: false };
             this.manualOverrideTimer = 0;
+            this.simFrame = 0;
 
             // --- Track Waypoints (Closed Continuous Loop) ---
             this.circuitWaypoints = this._generateCircuitWaypoints();
@@ -272,8 +273,8 @@
             const sunLight = new THREE.DirectionalLight(0xfffaed, 1.25);
             sunLight.position.set(65, 100, 45);
             sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 2048;
-            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.mapSize.width = 1024;
+            sunLight.shadow.mapSize.height = 1024;
             sunLight.shadow.camera.near = 15;
             sunLight.shadow.camera.far = 260;
             const d = 90;
@@ -635,7 +636,6 @@
                         new THREE.MeshStandardMaterial({ color: tierColors[t], roughness: 0.85 })
                     );
                     cone.position.y = tierY[t] * scale;
-                    cone.castShadow = true;
                     pine.add(cone);
                 }
 
@@ -683,7 +683,6 @@
                 clusters.forEach(c => {
                     const sph = new THREE.Mesh(new THREE.SphereGeometry(c.r * scale, 8, 8), c.m);
                     sph.position.set(c.x * scale, c.y * scale, c.z * scale);
-                    sph.castShadow = true;
                     tree.add(sph);
                 });
 
@@ -700,7 +699,6 @@
                 );
                 shrub.scale.set(1.4, 0.8, 1.2);
                 shrub.position.set(x, 0.6 * scale, z);
-                shrub.castShadow = true;
                 sceneryGroup.add(shrub);
                 this.trees.push({ pos: new THREE.Vector3(x, 0.8, z), radius: 1.2 * scale, label: 'tree' });
             };
@@ -1867,6 +1865,8 @@
         // 10. Update Loop: Non-Mirrored Controls & Autopilot Tracking
         // ---------------------------------------------------------------------
         update(dt = 0.016) {
+            this.simFrame = (this.simFrame || 0) + 1;
+
             if (this.manualOverrideTimer > 0) {
                 this.manualOverrideTimer -= dt;
             }
@@ -2164,6 +2164,13 @@
             this.isEvadingPedestrian = false;
             let nearestHazardDist = 999;
 
+            // Track stall time to prevent permanent vehicle deadlocks
+            if (this.ego.speed < 0.2) {
+                this._stallTimer = (this._stallTimer || 0) + dt;
+            } else {
+                this._stallTimer = 0;
+            }
+
             // A. Forward Traffic Vehicle Detection & Adaptive Cruise Control (ACC / AEB)
             // Ego car must stop or slow down for other cars and NEVER collide with them!
             if (this.trafficVehicles && this.trafficVehicles.length) {
@@ -2172,17 +2179,25 @@
                     const toCarZ = tv.z - this.ego.z;
                     const carFwd = -toCarX * sinYaw - toCarZ * cosYaw;
                     const carLat = toCarX * cosYaw - toCarZ * sinYaw;
+                    const isParked = (tv.speed || 0) === 0;
 
-                    // Check if lead car is ahead (0.4m to 25m) and within driving corridor (|lat| < 2.3m)
-                    if (carFwd > 0.4 && carFwd < 25.0 && Math.abs(carLat) < 2.3) {
+                    // Parked shoulder cars only trigger AEB if directly encroaching travel lane
+                    const maxCorridor = isParked ? 1.6 : 2.2;
+                    const stopDist = isParked ? 3.5 : 4.8;
+
+                    if (carFwd > 0.3 && carFwd < 25.0 && Math.abs(carLat) < maxCorridor) {
                         if (carFwd < nearestHazardDist) {
                             nearestHazardDist = carFwd;
 
                             // Progressive distance-based braking & safe vehicle following
-                            if (carFwd < 4.8) {
-                                // Full Emergency Stop to prevent impact!
-                                desiredSpeed = 0.0;
-                            } else if (carFwd < 9.0) {
+                            if (carFwd < stopDist) {
+                                // Full Emergency Stop, or gentle creep if stalled and lateral gap exists
+                                if (this._stallTimer > 1.2 && Math.abs(carLat) > 0.8) {
+                                    desiredSpeed = 1.2; // Creep past obstruction
+                                } else {
+                                    desiredSpeed = 0.0;
+                                }
+                            } else if (carFwd < 8.5) {
                                 // Safe crawling gap (~5 km/h)
                                 desiredSpeed = Math.min(desiredSpeed, 1.4);
                             } else if (carFwd < 16.0) {
@@ -2195,9 +2210,9 @@
                             }
 
                             // If stopped or very slow car ahead has lateral space, gently steer around
-                            if (carFwd < 12.0 && Math.abs(carLat) > 1.2) {
-                                const nudge = carLat > 0 ? -0.12 : 0.12;
-                                this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 2.5, -0.52, 0.52);
+                            if (carFwd < 14.0) {
+                                const nudge = carLat > 0 ? -0.16 : 0.16;
+                                this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 3.0, -0.52, 0.52);
                             }
                         }
                     }
@@ -2211,32 +2226,44 @@
                 const pedFwd = -toPedX * sinYaw - toPedZ * cosYaw;
                 const pedLat = toPedX * cosYaw - toPedZ * sinYaw;
 
-                // Only react if pedestrian is directly inside the vehicle travel lane (|lat| < 2.0m) and ahead (0.8m to 14m)
-                if (pedFwd > 0.8 && pedFwd < 14.0 && Math.abs(pedLat) < 2.0) {
+                // Only react if pedestrian is directly inside the vehicle travel lane (|lat| < 2.0m) and ahead (0.6m to 14m)
+                if (pedFwd > 0.6 && pedFwd < 14.0 && Math.abs(pedLat) < 2.0) {
                     if (pedFwd < nearestHazardDist) {
                         nearestHazardDist = pedFwd;
                         this.isEvadingPedestrian = true;
 
                         // Progressive smooth braking
-                        if (pedFwd < 4.2) {
-                            desiredSpeed = 0.0;
-                        } else if (pedFwd < 8.0) {
+                        if (pedFwd < 4.0) {
+                            // If car has been held stopped > 1.2s and ped has moved off center, crawl forward
+                            if (this._stallTimer > 1.2 && Math.abs(pedLat) > 0.9) {
+                                desiredSpeed = 1.2;
+                            } else {
+                                desiredSpeed = 0.0;
+                            }
+                        } else if (pedFwd < 7.5) {
                             desiredSpeed = Math.min(desiredSpeed, 1.6);
                         } else {
                             desiredSpeed = Math.min(desiredSpeed, 3.8);
                         }
 
                         // Gentle evasion nudge within lane limits
-                        const nudge = pedLat >= 0 ? -0.15 : 0.15;
-                        this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 3.0, -0.52, 0.52);
+                        const nudge = pedLat >= 0 ? -0.16 : 0.16;
+                        this.ego.steerAngle = THREE.MathUtils.clamp(this.ego.steerAngle + nudge * dt * 3.2, -0.52, 0.52);
                     }
                 }
             });
 
+            // Active un-stick: if stopped at 0 for > 2.0s with no imminent contact, resume crawling
+            if (this._stallTimer > 2.0 && nearestHazardDist > 3.0) {
+                desiredSpeed = Math.max(desiredSpeed, 1.8);
+            }
+
             this.ego.desiredSpeed = desiredSpeed;
 
             // Heading update from steering angle and vehicle velocity (Ackermann model)
-            this.ego.yaw -= this.ego.steerAngle * (this.ego.speed * 0.14) * dt * 3.6;
+            // Allow low-speed pivoting so car never gets stuck facing wrong angle
+            const effectiveSpeed = Math.max(0.6, Math.abs(this.ego.speed));
+            this.ego.yaw -= this.ego.steerAngle * (effectiveSpeed * 0.14) * dt * 3.6;
 
             // Smooth Acceleration / Braking
             if (this.ego.speed < desiredSpeed) {
@@ -2343,7 +2370,7 @@
 
                 let currentSpeed = ped.speed;
                 let alertReaction = false;
-                if (distToCar < 5.8 && carHeadingToward && Math.abs(this.ego.speed) > 0.5) {
+                if (distToCar < 6.8) {
                     alertReaction = true;
                     currentSpeed = ped.speed * 1.65; // Evasive jogging speed
                 }
@@ -2357,7 +2384,7 @@
                 const curDist = Math.hypot(ped.x - ped.startX, ped.z - ped.startZ);
                 if (curDist >= totalDist && ped.direction === 1) {
                     ped.direction = -1;
-                } else if (curDist <= 0.25 && ped.direction === -1) {
+                } else if (curDist <= 0.45 && ped.direction === -1) {
                     ped.direction = 1;
                 }
 
@@ -2440,6 +2467,7 @@
             this.windshieldCam.position.set(eyeX, eyeY, eyeZ);
             this.windshieldCam.up.set(0, 1, 0);
             this.windshieldCam.lookAt(eyeX + fwdX * 30.0, eyeY, eyeZ + fwdZ * 30.0);
+            this.windshieldCam.updateMatrixWorld(true);
 
             // User View Camera (Aspect-aware framing for Dual Split Screen vs Full Viewport)
             const aspect = this.width / Math.max(1, this.height);
@@ -2546,6 +2574,9 @@
                 return this._cachedDetected;
             }
 
+            // Ensure windshield camera matrix is strictly up-to-date for projection
+            this.windshieldCam.updateMatrixWorld(true);
+
             const results = [];
             const actors = [
                 ...this.pedestrians.map(p => ({ x: p.x, y: 0.95, z: p.z, label: p.label })),
@@ -2575,7 +2606,7 @@
                 this._tempProjVec.set(act.x, act.y, act.z).project(this.windshieldCam);
                 const pProj = this._tempProjVec;
                 if (pProj.z < 0 || pProj.z > 1) return;
-                if (pProj.x < -1.15 || pProj.x > 1.15 || pProj.y < -1.15 || pProj.y > 1.15) return;
+                if (pProj.x < -1.05 || pProj.x > 1.05 || pProj.y < -1.05 || pProj.y > 1.05) return;
 
                 const screenX = (pProj.x + 1) / 2;
                 const screenY = (-pProj.y + 1) / 2;
@@ -2625,65 +2656,72 @@
             });
 
             // Track roadside trees & vegetation ahead in windshield camera frustum
-            // Efficient batch filtering: zero garbage allocations & limit to closest 10 prominent trees
+            // Focus on prominent near roadside trees (max 2) to avoid screen clutter
+            // Track roadside trees & vegetation ahead in windshield camera frustum
+            // Static scene vegetation caching: re-evaluate tree projections every 3 simulation frames
+            // and prune to near roadside perimeter (distSq <= 784, i.e. 28m) to maintain locked 60 FPS
             if (this.trees && this.trees.length) {
-                const treeCandidates = [];
-                for (let i = 0; i < this.trees.length; i++) {
-                    const tree = this.trees[i];
-                    const tPos = tree.pos;
-                    if (!tPos) continue;
+                if (this.simFrame % 3 === 0 || !this._cachedNearTrees) {
+                    const treeCandidates = [];
+                    for (let i = 0; i < this.trees.length; i++) {
+                        const tree = this.trees[i];
+                        const tPos = tree.pos;
+                        if (!tPos) continue;
 
-                    const dx = tPos.x - egoX;
-                    const dz = tPos.z - egoZ;
-                    const distSq = dx * dx + dz * dz;
-                    if (distSq < 9 || distSq > 4900) continue; // 3m to 70m
+                        const dx = tPos.x - egoX;
+                        const dz = tPos.z - egoZ;
+                        const distSq = dx * dx + dz * dz;
+                        if (distSq < 9 || distSq > 784) continue; // 3m to 28m perimeter only
 
-                    const dot = dx * egoFwdX + dz * egoFwdZ;
-                    if (dot <= 0.3) continue; // In front only
+                        const dot = dx * egoFwdX + dz * egoFwdZ;
+                        if (dot <= 0.3) continue; // In front only
 
-                    this._tempProjVec.set(tPos.x, tPos.y, tPos.z).project(this.windshieldCam);
-                    const pz = this._tempProjVec.z;
-                    const px = this._tempProjVec.x;
-                    const py = this._tempProjVec.y;
+                        this._tempProjVec.set(tPos.x, 1.8, tPos.z).project(this.windshieldCam);
+                        const pz = this._tempProjVec.z;
+                        const px = this._tempProjVec.x;
+                        const py = this._tempProjVec.y;
 
-                    if (pz < 0 || pz > 1) continue;
-                    if (px < -1.15 || px > 1.15 || py < -1.15 || py > 1.15) continue;
+                        if (pz < 0 || pz > 1) continue;
+                        if (px < -1.05 || px > 1.05 || py < -1.05 || py > 1.05) continue;
 
-                    const dist = Math.sqrt(distSq);
-                    treeCandidates.push({
-                        dist,
-                        screenX: (px + 1) / 2,
-                        screenY: (-py + 1) / 2
-                    });
+                        const dist = Math.sqrt(distSq);
+                        treeCandidates.push({
+                            dist,
+                            screenX: (px + 1) / 2,
+                            screenY: (-py + 1) / 2
+                        });
+                    }
+
+                    // Sort and select the closest prominent roadside trees/hedges in view
+                    treeCandidates.sort((a, b) => a.dist - b.dist);
+                    this._cachedNearTrees = treeCandidates.slice(0, 2);
                 }
 
-                // Sort and select the closest prominent roadside trees/hedges in view
-                treeCandidates.sort((a, b) => a.dist - b.dist);
-                const maxTrees = Math.min(treeCandidates.length, 10);
+                if (this._cachedNearTrees) {
+                    for (let i = 0; i < this._cachedNearTrees.length; i++) {
+                        const tc = this._cachedNearTrees[i];
+                        const dist = tc.dist;
+                        const boxW = THREE.MathUtils.clamp(180 / Math.max(1, dist), 20, 110);
+                        const boxH = THREE.MathUtils.clamp(230 / Math.max(1, dist), 28, 140);
 
-                for (let i = 0; i < maxTrees; i++) {
-                    const tc = treeCandidates[i];
-                    const dist = tc.dist;
-                    const boxW = THREE.MathUtils.clamp(180 / Math.max(1, dist), 20, 110);
-                    const boxH = THREE.MathUtils.clamp(230 / Math.max(1, dist), 28, 140);
-
-                    results.push({
-                        label: 'tree',
-                        dist: dist,
-                        ringId: dist <= 10 ? 0 : (dist <= 30 ? 1 : 2),
-                        resolution: dist <= 10 ? '5cm' : (dist <= 30 ? '15cm' : '50cm'),
-                        bearing01: tc.screenX,
-                        rangeBand: dist <= 10 ? 'near' : (dist <= 30 ? 'mid' : 'far'),
-                        confidence: 0.98,
-                        masked: true,
-                        maskType: 'Static Scene / Vegetation Caching',
-                        box: {
-                            x: tc.screenX,
-                            y: tc.screenY,
-                            w: boxW,
-                            h: boxH
-                        }
-                    });
+                        results.push({
+                            label: 'tree',
+                            dist: dist,
+                            ringId: dist <= 10 ? 0 : (dist <= 30 ? 1 : 2),
+                            resolution: dist <= 10 ? '5cm' : (dist <= 30 ? '15cm' : '50cm'),
+                            bearing01: tc.screenX,
+                            rangeBand: dist <= 10 ? 'near' : (dist <= 30 ? 'mid' : 'far'),
+                            confidence: 0.98,
+                            masked: true,
+                            maskType: 'Static Scene / Vegetation Caching',
+                            box: {
+                                x: tc.screenX,
+                                y: tc.screenY,
+                                w: boxW,
+                                h: boxH
+                            }
+                        });
+                    }
                 }
             }
 
@@ -2695,7 +2733,7 @@
         resize(width, height) {
             this.width = width;
             this.height = height;
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
             this.renderer.setPixelRatio(dpr);
             this.renderer.setSize(width, height, false);
             const aspect = width / height;

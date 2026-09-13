@@ -213,7 +213,7 @@ def _merge_near_boxes(cands, fw, fh):
     """Union person fragments: overlap OR near (same body).
 
     Face/hands/arms of ONE seated person produce adjacent skin blobs whose
-    expanded body boxes overlap or sit within ~1 box width of each other.
+    expanded body boxes overlap or sit within the bodily corridor of each other.
     Two genuinely separate people are far apart horizontally, so they never
     merge. Returns merged (x, y, w, h, label, conf) tuples.
     """
@@ -235,8 +235,8 @@ def _merge_near_boxes(cands, fw, fh):
                     continue
                 bx, by, bw, bh, blab, bconf = boxes[j]
                 bcx, bcy = bx + bw / 2.0, by + bh / 2.0
-                near_x = abs(acx - bcx) < (aw + bw) * 0.6
-                near_y = abs(acy - bcy) < (ah + bh) * 0.6
+                near_x = abs(acx - bcx) < max(aw, bw) * 2.2 + fw * 0.08
+                near_y = abs(acy - bcy) < max(ah, bh) * 3.0 + fh * 0.20
                 if _iou((ax, ay, aw, ah), (bx, by, bw, bh)) > 0.05 or (
                         near_x and near_y):
                     x1 = min(ax, bx)
@@ -518,14 +518,22 @@ class SemanticDetector:
         conts, _ = cv2.findContours(dark, cv2.RETR_EXTERNAL,
                                     cv2.CHAIN_APPROX_SIMPLE)
         for c in conts:
-            if cv2.contourArea(c) < (fw * fh) * 0.012:
+            if cv2.contourArea(c) < (fw * fh) * 0.015:
                 continue
             x, y, w, bh = cv2.boundingRect(c)
-            if bh < fh * 0.06 or w < fw * 0.06:
+            if bh < fh * 0.08 or w < fw * 0.12:
+                continue
+            if w > fw * 0.75 or bh > fh * 0.65:
+                continue
+            if x <= 2 and (x + w) >= fw - 2:
                 continue
             aspect = w / float(max(1, bh))
-            if not (1.05 <= aspect <= 5.0):
-                continue  # taller than wide -> person / pole / shadow
+            if not (1.25 <= aspect <= 4.2):
+                continue  # taller than wide or giant strip -> not a vehicle
+            # Check internal texture variance to reject flat walls and room shadows
+            crop = roi[y:y + bh, x:x + w]
+            if crop.size > 0 and float(np.std(crop)) < 14.0:
+                continue
             boxes.append((x, y + int(fh * 0.30), w, bh, 0.50))
         return boxes
 
@@ -549,12 +557,14 @@ class SemanticDetector:
         for (x, y, w, h, c) in self._vehicle_blobs(frame_bgr, fw, fh):
             cand.append((x, y, w, h, "vehicle", c))
         # Collapse body-part fragments: overlapping OR near person boxes
-        # (same vertical band, centres within ~1 box width) belong to ONE
+        # (same vertical band, centres within bodily corridor) belong to ONE
         # person — union them BEFORE NMS so face+hands != 3 people.
         persons = [c for c in cand if c[4] == "person"]
         others = [c for c in cand if c[4] != "person"]
         persons = _merge_near_boxes(persons, fw, fh)
-        cand = persons + others
+        # Suppress any vehicle detections that overlap with a detected person (clothing/chair/shadow)
+        vehicles = [v for v in others if not any(_iou(v[:4], p[:4]) > 0.10 for p in persons)]
+        cand = persons + vehicles
         # NMS by IoU, persons win ties (multiple cues).
         cand.sort(key=lambda t: -t[5])
         kept = []
