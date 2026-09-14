@@ -277,30 +277,94 @@ Output topics published:
 
 ## 🔌 Hardware Sensor Setup & Physical Testing
 
-You can run this software with **live physical LiDAR hardware**, **webcam / CSI cameras**, **ROS 2 bag recordings**, or **offline open datasets**.
+You can run this software with **Waveshare WAVE ROVER (ESP32 + Raspberry Pi CPU)**, **NVIDIA Jetson boards**, **live physical LiDARs**, **webcam / CSI cameras**, or **offline open datasets**.
 
 ```
-                           [ Physical Vehicle Setup ]
-    ┌───────────────────────────────┐     ┌──────────────────────────────┐
-    │     3D Automotive LiDAR       │     │    Front Automotive Camera   │
-    │ (Velodyne / Ouster / Hesai)   │     │   (USB Webcam / Sony IMX)    │
-    └───────────────┬───────────────┘     └──────────────┬───────────────┘
-                    │ Ethernet (RJ45)                    │ USB 3.0 / CSI-2
-                    ▼                                    ▼
-       ┌────────────────────────┐           ┌────────────────────────┐
-       │   Static IP / Switch   │           │   V4L2 Device Driver   │
-       │   192.168.1.100 (Host) │           │     /dev/video0        │
-       └───────────┬────────────┘           └────────────┬───────────┘
-                   │ UDP Packets                         │ BGR Frames
-                   └──────────────────┬──────────────────┘
-                                      ▼
-                    ┌──────────────────────────────────┐
-                    │    NVIDIA Jetson / Onboard PC    │
-                    │   Foveated 2.5D Fusion Engine    │
-                    └──────────────────────────────────┘
+                           [ Physical Hardware Deployments ]
+
+   Option A: Low-Cost / CPU (No GPU)             Option B: High-Performance / GPU
+   ┌───────────────────────────────┐             ┌───────────────────────────────┐
+   │     Waveshare WAVE ROVER      │             │   NVIDIA Jetson Orin / Nano   │
+   │  • Raspberry Pi 4/5 (CPU)     │             │  • Ampere GPU / TensorRT      │
+   │  • Built-in ESP32 (Motors)    │             │  • CUDA Kernel Grid Binning   │
+   │  • RPLiDAR / LD19 (USB)       │             │  • 3D LiDAR (Velodyne/Ouster) │
+   └───────────────────────────────┘             └───────────────────────────────┘
 ```
 
-### 1. Connecting Physical LiDAR Hardware (Ethernet UDP)
+---
+
+### 1. Waveshare WAVE ROVER Setup (ESP32 + Raspberry Pi CPU — Low-Cost / Zero GPU)
+
+For autonomous rovers, budget prototypes, and hackathons (e.g. Smart India Hackathon), this project runs entirely on **pure CPU** without expensive GPUs using the **Waveshare WAVE ROVER**.
+
+👉 **Full Step-by-Step Guide & Precautions:** [WAVE_ROVER_SETUP.md](WAVE_ROVER_SETUP.md)
+
+```
+       [ 360° LiDAR (RPLiDAR / LD19) ]          [ CSI Pi Camera / USB Cam ]
+                   │ (USB Cable)                               │ (Ribbon / USB)
+                   ▼                                           ▼
+       ┌──────────────────────────────────────────────────────────────┐
+       │             Raspberry Pi 4 / 5 (Pure CPU Brain)              │
+       │   • Foveated 2.5D Concentric Grid Engine (<2ms latency)      │
+       │   • Real-Time Obstacle Avoidance Safety Bubble               │
+       │   • Live MJPEG Video Streamer (Port 8081)                    │
+       │   • Web Dashboard Server (Port 8080)                         │
+       └──────────────────────────────┬───────────────────────────────┘
+                                      │ UART (/dev/ttyS0) or USB (/dev/ttyUSB0)
+                                      ▼ 115200 Baud JSON Protocol
+       ┌──────────────────────────────────────────────────────────────┐
+       │             Wave Rover Onboard ESP32 Sub-Controller          │
+       │   • Dual Closed-Loop PID Motor Drivers (Left / Right)        │
+       │   • Optical Wheel Encoders (Hardware Interrupts)             │
+       │   • INA219 Voltage & Current Sensor (3x 18650 Batteries)     │
+       └──────────────────────────────────────────────────────────────┘
+```
+
+#### Quick Start on Raspberry Pi:
+1. **Connect Hardware:**
+   * Built-in ESP32 $\leftrightarrow$ Raspberry Pi via UART (`/dev/ttyS0`) or micro-USB cable (`/dev/ttyUSB0`).
+   * LiDAR $\leftrightarrow$ Raspberry Pi USB 3.0 port.
+   * Camera $\leftrightarrow$ Raspberry Pi CSI ribbon cable or USB port.
+   * 3x 18650 Li-ion cells installed in battery tray (*verify +/- polarity strictly!*).
+2. **Launch the Rover Perception Bridge:**
+   ```bash
+   chmod +x scripts/run_waverover.sh
+   ./scripts/run_waverover.sh
+   ```
+3. **Open from Any Laptop/Tablet (Zero-Install):**
+   Connect to the same Wi-Fi network and open in Chrome / Edge:
+   ```
+   http://<rover-ip>:8080
+   ```
+   * Live Camera Stream: `http://<rover-ip>:8081/video_feed`
+   * Autonomous safety bubble prevents collisions by triggering emergency brakes at $<0.6\text{m}$.
+
+---
+
+### 2. NVIDIA Jetson Platform Setup (Orin / Xavier / Nano — CUDA Accelerated)
+
+For production autonomous vehicles and edge computing with hardware GPU acceleration:
+
+```bash
+# 1. Automated JetPack 5.1 / 6.0 Environment Setup
+chmod +x scripts/jetson_setup.sh
+./scripts/jetson_setup.sh
+
+# 2. Build Native C++ & CUDA Kernels
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DUSE_CUDA=ON
+make -j$(nproc)
+
+# 3. Launch Native Jetson Ingestion (CSI Camera via nvarguscamerasrc + ROS 2 LiDAR)
+python3 python/jetson_live_processor.py --camera-type csi --device 0 --lidar-topic /velodyne_points
+```
+
+* **Live Hardware Telemetry:** Runs `python/telemetry.py` to stream real-time Tegra metrics (GPU utilization %, VRAM MB, SoC power draw in Watts, and thermal sensor °C) directly into the HUD.
+* **Cross-Compilation:** A dedicated CMake toolchain for ARM64 Jetson targets is available at `cmake/jetson-aarch64-toolchain.cmake`.
+
+---
+
+### 3. Connecting Physical LiDAR Hardware (Ethernet UDP)
 
 1. **Network Interface Configuration**:
    * Connect the sensor RJ45 cable to your computer or vehicle switch.
@@ -315,7 +379,7 @@ You can run this software with **live physical LiDAR hardware**, **webcam / CSI 
    * **Livox**: Mid-360, Mid-70, HAP (via `livox_ros_driver2`)
    * **Hesai**: Pandar40P, PandarXT-32, QT64
 
-### 2. Connecting Physical Cameras (USB / CSI / RTSP)
+### 4. Connecting Physical Cameras (USB / CSI / RTSP)
 
 * **Webcam / USB Camera**:
   Select **"📷 Live Camera (Physical Webcam)"** from the web UI control panel, or configure device index in Python:
@@ -327,7 +391,7 @@ You can run this software with **live physical LiDAR hardware**, **webcam / CSI 
   python python/camera_foveated_processor.py --source "rtsp://admin:pass@192.168.1.64:554/h264Preview_01_main"
   ```
 
-### 3. Testing with SemanticKITTI Datasets
+### 5. Testing with SemanticKITTI Datasets
 Download sample `.bin` point clouds from SemanticKITTI and run our offline validation tool:
 ```bash
 python python/run_offline_pipeline.py --scan my_dataset/000000.bin
