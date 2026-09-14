@@ -50,3 +50,23 @@ ultralytics>=8.0     # Real YOLOv8n pixel inspection (person + vehicle shapes).
                      # resolves backend=yolov8n; without it the server falls
                      # back to YOLOv5 (torch Hub, needs network once) then to
                      # an offline cv-cascade.
+
+# -----------------------------------------------------------------------
+# Cloud / Colab GPU deployment (physical-testing.md Section 2, Option 1)
+# -----------------------------------------------------------------------
+pynvml>=11.0         # Cloud GPU telemetry (VRAM, utilization, power, temp).
+                     # Works on discrete NVIDIA GPUs (T4/L4/RTX) but NOT on
+                     # Jetson integrated GPUs — use jetson-stats instead.
+pyngrok>=7.0         # Ngrok tunnel for public dashboard URL from Colab.
+                     # Used by colab_deploy.ipynb to expose the dashboard.
+
+# CPU fallback telemetry (laptop / no-GPU mode)
+psutil>=5.9          # System memory and CPU usage monitoring.
+
+# -----------------------------------------------------------------------
+# Jetson board deployment (physical-testing.md Section 7)
+# Uncomment these when deploying on a physical Jetson Orin/Xavier board.
+# -----------------------------------------------------------------------
+# jetson-stats>=4.2  # jtop / tegrastats for Jetson GPU/power/thermal telemetry.
+                     # Install with: sudo pip3 install jetson-stats
+                     # Required for the JetsonTelemetry backend in python/telemetry.py.

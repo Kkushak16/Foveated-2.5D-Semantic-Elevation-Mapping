@@ -27,12 +27,13 @@ def find_available_port(start_port=8080, max_attempts=10):
                 continue
     return start_port
 
-def main():
+def main(port=None):
     print("=" * 75)
     print("  LAUNCHING UNIFIED DUAL-SENSOR FOVEATED PERCEPTION DASHBOARD")
     print("=" * 75)
 
-    port = find_available_port(8080)
+    if port is None:
+        port = find_available_port(8080)
     url = f"http://localhost:{port}"
 
     server_proc = None

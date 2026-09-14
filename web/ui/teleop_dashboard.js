@@ -3169,3 +3169,143 @@ window.switchVehicleMotion = switchVehicleMotion;
 window.updatePointDensity = updatePointDensity;
 window.toggleSimulation = toggleSimulation;
 window.switchCodeTab = switchCodeTab;
+
+// =========================================================================
+// HARDWARE TELEMETRY POLLING (physical-testing.md Section 9)
+// Fetches live GPU/power/thermal metrics from /api/telemetry and updates
+// the dashboard cards. Also detects and highlights thermal throttling.
+// =========================================================================
+(function initHardwareTelemetry() {
+    const POLL_INTERVAL_MS = 3000;  // Poll every 3 seconds
+    const TEMP_WARN_C = 80;
+    const TEMP_THROTTLE_C = 85;
+
+    // Platform label mapping
+    const PLATFORM_LABELS = {
+        cloud: { label: 'LIVE: Colab T4 — Cloud GPU', cssClass: 'platform-cloud' },
+        jetson: { label: 'LIVE: Jetson Orin — Edge Device', cssClass: 'platform-jetson' },
+        laptop: { label: 'LOCAL: Laptop CPU — No GPU', cssClass: 'platform-laptop' },
+    };
+
+    const SOURCE_LABELS = {
+        local: 'CSI/USB Camera',
+        phone: 'WebRTC Phone Camera',
+        replay: 'SemanticKITTI Replay',
+        simulator: '3D Simulator',
+    };
+
+    // --- Source indicator badge (one-time platform detection) ---
+    async function detectPlatform() {
+        const badge = document.getElementById('source-indicator-badge');
+        const text = document.getElementById('source-indicator-text');
+        if (!badge || !text) return;
+
+        try {
+            const res = await fetch('/api/platform');
+            if (!res.ok) throw new Error('API unavailable');
+            const data = await res.json();
+
+            const pInfo = PLATFORM_LABELS[data.platform] || PLATFORM_LABELS.laptop;
+            const sourceLabel = SOURCE_LABELS[data.source] || data.source;
+
+            // Update badge
+            badge.className = 'source-indicator-badge ' + pInfo.cssClass;
+            text.textContent = pInfo.label + ' — ' + sourceLabel;
+        } catch (e) {
+            // Fallback: mark as simulated/local when no server API is available
+            badge.className = 'source-indicator-badge platform-simulated';
+            text.textContent = 'SIMULATED: Local — 3D Simulator';
+        }
+    }
+
+    // --- Telemetry card updates ---
+    async function pollTelemetry() {
+        try {
+            const res = await fetch('/api/telemetry');
+            if (!res.ok) return;
+            const m = await res.json();
+
+            // GPU Utilization
+            const gpuEl = document.getElementById('stat-gpu-util');
+            const gpuSub = document.getElementById('stat-gpu-util-sub');
+            if (gpuEl) gpuEl.textContent = m.gpu_util_pct.toFixed(1) + ' %';
+            if (gpuSub) gpuSub.textContent = m.platform === 'cloud' ? 'T4/L4 Discrete GPU' :
+                                              m.platform === 'jetson' ? 'Jetson iGPU' : 'CPU Utilization';
+
+            // VRAM (Live)
+            const vramEl = document.getElementById('stat-vram-live');
+            const vramSub = document.getElementById('stat-vram-live-sub');
+            if (vramEl) vramEl.textContent = m.vram_used_mb.toFixed(0) + ' MB';
+            if (vramSub) {
+                const total = m.vram_total_mb > 0 ? m.vram_total_mb.toFixed(0) : '—';
+                vramSub.textContent = total + ' MB Total';
+            }
+
+            // Power Draw
+            const powerEl = document.getElementById('stat-power-draw');
+            const powerSub = document.getElementById('stat-power-sub');
+            if (powerEl) {
+                if (m.power_draw_w > 0) {
+                    powerEl.textContent = m.power_draw_w.toFixed(1) + ' W';
+                } else {
+                    powerEl.textContent = '— W';
+                }
+            }
+            if (powerSub) {
+                powerSub.textContent = m.power_draw_w > 0
+                    ? (m.platform === 'jetson' ? 'Board Power (MAXN)' : 'GPU TDP Draw')
+                    : 'Not available on CPU';
+            }
+
+            // SoC Temperature
+            const tempEl = document.getElementById('stat-soc-temp');
+            const tempSub = document.getElementById('stat-temp-sub');
+            const tempCard = document.getElementById('card-soc-temp');
+            if (tempEl) {
+                if (m.soc_temp_c > 0) {
+                    tempEl.textContent = m.soc_temp_c.toFixed(1) + ' °C';
+                } else {
+                    tempEl.textContent = '— °C';
+                }
+            }
+            if (tempSub) {
+                if (m.soc_temp_c >= TEMP_THROTTLE_C) {
+                    tempSub.textContent = '⚠️ THERMAL THROTTLING!';
+                } else if (m.soc_temp_c >= TEMP_WARN_C) {
+                    tempSub.textContent = '⚠️ High Temperature';
+                } else if (m.soc_temp_c > 0) {
+                    tempSub.textContent = 'Normal Operating Range';
+                } else {
+                    tempSub.textContent = 'Not available on CPU';
+                }
+            }
+
+            // Temperature warning CSS classes
+            if (tempCard) {
+                tempCard.classList.remove('temp-warn', 'temp-throttle');
+                if (m.soc_temp_c >= TEMP_THROTTLE_C) {
+                    tempCard.classList.add('temp-throttle');
+                } else if (m.soc_temp_c >= TEMP_WARN_C) {
+                    tempCard.classList.add('temp-warn');
+                }
+            }
+
+            // Mark all telemetry cards as active (enables bottom bar animation)
+            document.querySelectorAll('.telemetry-card').forEach(card => {
+                card.classList.add('telemetry-active');
+            });
+
+        } catch (e) {
+            // API not available — telemetry cards stay in "awaiting" state
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        detectPlatform();
+        // Start telemetry polling with a small initial delay
+        setTimeout(() => {
+            pollTelemetry();
+            setInterval(pollTelemetry, POLL_INTERVAL_MS);
+        }, 1500);
+    });
+})();

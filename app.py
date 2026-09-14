@@ -3,11 +3,19 @@ app.py — Unified Dual-Sensor Foveated 2.5D Perception Web Dashboard
 ===================================================================
 Master entrypoint for the unified web dashboard.
 
+Supports three deployment tiers (see physical-testing.md):
+  - cloud   : Google Colab / RunPod with pynvml telemetry + ngrok tunnel
+  - jetson  : NVIDIA Jetson board with jtop telemetry + local camera
+  - laptop  : CPU-only fallback with psutil telemetry
+
 Usage:
-    py app.py               -> Launches local server & opens Web Dashboard at http://localhost:8080
-    streamlit run app.py    -> Launches Streamlit App embedding the Unified Web HUD
+    py app.py                                        -> Launches local dashboard
+    py app.py --port 8080 --platform cloud           -> Colab/cloud mode
+    py app.py --port 8080 --platform jetson --source local  -> Jetson mode
+    streamlit run app.py                             -> Launches Streamlit App
 """
 
+import argparse
 import os
 import sys
 
@@ -20,9 +28,34 @@ try:
 except ImportError:
     is_streamlit = False
 
+
+def parse_args():
+    """Parse CLI arguments for multi-tier deployment."""
+    parser = argparse.ArgumentParser(
+        description="Foveated 2.5D Perception Dashboard")
+    parser.add_argument("--port", type=int, default=8080,
+                        help="Dashboard server port (default: 8080)")
+    parser.add_argument("--platform", default="laptop",
+                        choices=["cloud", "jetson", "laptop"],
+                        help="Deployment platform for telemetry source "
+                             "(default: laptop)")
+    parser.add_argument("--source", default="simulator",
+                        choices=["local", "phone", "replay", "simulator"],
+                        help="Camera source: local (USB/CSI), phone (WebRTC), "
+                             "replay (recorded), simulator (3D sim)")
+    return parser.parse_args()
+
+
 def run_standalone():
+    args = parse_args()
+    # Set environment variables so child processes (Node bridge, YOLO server)
+    # can pick up the platform and source configuration
+    os.environ["FOVEATED_PLATFORM"] = args.platform
+    os.environ["FOVEATED_SOURCE"] = args.source
+    os.environ["PORT"] = str(args.port)
     import run_dashboard
-    run_dashboard.main()
+    run_dashboard.main(port=args.port)
+
 
 if __name__ == "__main__":
     # Check if executed directly with python (e.g. `py app.py`) vs `streamlit run app.py`

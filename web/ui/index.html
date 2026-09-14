@@ -325,6 +325,12 @@ void process_scan(const FoveatedPointBuffer& scan) {
                 <span class="status-dot"></span>
                 <span>ORIN-ECU-01 ONLINE</span>
             </div>
+
+            <!-- Source Indicator Badge (physical-testing.md Section 9 Item 3) -->
+            <div class="source-indicator-badge" id="source-indicator-badge">
+                <span class="source-indicator-dot"></span>
+                <span id="source-indicator-text">DETECTING PLATFORM...</span>
+            </div>
         </div>
 
         <!-- Main Dashboard 3-Column Layout Container -->
@@ -409,6 +415,37 @@ void process_scan(const FoveatedPointBuffer& scan) {
                         <div class="metric-label">RAM / VRAM Saved</div>
                         <div class="metric-val" id="stat-memory">-99.1%</div>
                         <div class="metric-sub">18.4 MB (O(1) SoA)</div>
+                    </div>
+                </div>
+
+                <!-- Hardware Telemetry (physical-testing.md Section 9 Items 1-2) -->
+                <div class="panel-title" style="margin-top: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+                    Hardware Telemetry
+                </div>
+                <div class="metric-grid hardware-telemetry-grid">
+                    <div class="metric-card telemetry-card" id="card-gpu-util">
+                        <div class="metric-label">GPU Utilization</div>
+                        <div class="metric-val" id="stat-gpu-util" style="color: var(--accent-cyan);">— %</div>
+                        <div class="metric-sub" id="stat-gpu-util-sub">Awaiting telemetry...</div>
+                    </div>
+
+                    <div class="metric-card telemetry-card" id="card-vram-live">
+                        <div class="metric-label">VRAM Usage (Live)</div>
+                        <div class="metric-val" id="stat-vram-live" style="color: var(--accent-green);">— MB</div>
+                        <div class="metric-sub" id="stat-vram-live-sub">Awaiting telemetry...</div>
+                    </div>
+
+                    <div class="metric-card telemetry-card" id="card-power-draw">
+                        <div class="metric-label">Power Draw (W)</div>
+                        <div class="metric-val" id="stat-power-draw" style="color: var(--accent-orange);">— W</div>
+                        <div class="metric-sub" id="stat-power-sub">Awaiting telemetry...</div>
+                    </div>
+
+                    <div class="metric-card telemetry-card" id="card-soc-temp">
+                        <div class="metric-label">SoC Temp (°C)</div>
+                        <div class="metric-val" id="stat-soc-temp" style="color: var(--accent-purple);">— °C</div>
+                        <div class="metric-sub" id="stat-temp-sub">Awaiting telemetry...</div>
                     </div>
                 </div>
 

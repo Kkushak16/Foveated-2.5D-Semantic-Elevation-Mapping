@@ -33,7 +33,23 @@ check_language(CUDA)
 if(CMAKE_CUDA_COMPILER)
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD 17)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math -gencode arch=compute_87,code=sm_87")
+
+    # Multi-platform CUDA architecture support:
+    # - Jetson Orin (Nano/NX/AGX):  compute_87 (Ampere iGPU)
+    # - Jetson Xavier (NX/AGX):     compute_72 (Volta iGPU)
+    # - Cloud T4 (Colab):           compute_75 (Turing)
+    # - Cloud L4:                   compute_89 (Ada Lovelace)
+    # Auto-detect: if building on/for aarch64 (Jetson), use Jetson archs;
+    # otherwise assume cloud/desktop GPU.
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(CUDA_ARCH_FLAGS "-gencode arch=compute_72,code=sm_72 -gencode arch=compute_87,code=sm_87")
+        message(STATUS "CUDA: Targeting Jetson architectures (Xavier sm_72, Orin sm_87)")
+    else()
+        set(CUDA_ARCH_FLAGS "-gencode arch=compute_75,code=sm_75 -gencode arch=compute_87,code=sm_87 -gencode arch=compute_89,code=sm_89")
+        message(STATUS "CUDA: Targeting cloud/desktop architectures (T4 sm_75, Orin sm_87, L4 sm_89)")
+    endif()
+
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3 --use_fast_math ${CUDA_ARCH_FLAGS}")
     include_directories(cuda/include)
 
     add_library(cuda_grid_projection STATIC

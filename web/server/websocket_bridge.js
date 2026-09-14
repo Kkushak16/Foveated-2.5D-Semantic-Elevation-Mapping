@@ -90,6 +90,48 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // -----------------------------------------------------------------------
+    // Telemetry API — serves live GPU/system metrics from the Python module
+    // (Section 9 of physical-testing.md: frontend telemetry upgrades)
+    // -----------------------------------------------------------------------
+    if (reqUrl === '/api/telemetry') {
+        const platform = process.env.FOVEATED_PLATFORM || 'auto';
+        const { execFile } = require('child_process');
+        execFile(PYTHON, [
+            path.join(ROOT, 'python', 'telemetry.py'),
+            '--platform', platform, '--json'
+        ], { timeout: 5000, cwd: ROOT }, (err, stdout) => {
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache'
+            });
+            if (err) {
+                res.end(JSON.stringify({
+                    error: true,
+                    platform: platform,
+                    vram_used_mb: 0, vram_total_mb: 0,
+                    gpu_util_pct: 0, power_draw_w: 0, soc_temp_c: 0
+                }));
+            } else {
+                res.end(stdout.trim());
+            }
+        });
+        return;
+    }
+
+    // Platform info endpoint — returns the current deployment tier
+    if (reqUrl === '/api/platform') {
+        const platform = process.env.FOVEATED_PLATFORM || 'laptop';
+        const source = process.env.FOVEATED_SOURCE || 'simulator';
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ platform, source }));
+        return;
+    }
+
     let filePath = path.join(UI_DIR, reqUrl === '/' ? 'index.html' : reqUrl);
     let extname = path.extname(filePath);
     let contentType = 'text/html';

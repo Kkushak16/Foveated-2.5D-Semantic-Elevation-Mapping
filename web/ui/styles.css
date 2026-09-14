@@ -1389,3 +1389,110 @@ body.landing-active {
 }
 
 
+/* ==========================================================================
+   HARDWARE TELEMETRY & SOURCE INDICATOR (physical-testing.md Section 9)
+   ========================================================================== */
+
+/* Source Indicator Badge — shows deployment platform in dashboard header */
+.source-indicator-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+.source-indicator-badge.platform-cloud {
+    background: rgba(56, 189, 248, 0.08);
+    border-color: rgba(56, 189, 248, 0.25);
+    color: var(--accent-cyan);
+}
+
+.source-indicator-badge.platform-jetson {
+    background: rgba(52, 211, 153, 0.08);
+    border-color: rgba(52, 211, 153, 0.25);
+    color: var(--accent-green);
+}
+
+.source-indicator-badge.platform-laptop {
+    background: rgba(168, 85, 247, 0.08);
+    border-color: rgba(168, 85, 247, 0.25);
+    color: var(--accent-purple);
+}
+
+.source-indicator-badge.platform-simulated {
+    background: rgba(251, 191, 36, 0.08);
+    border-color: rgba(251, 191, 36, 0.25);
+    color: var(--accent-gold);
+}
+
+.source-indicator-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: source-pulse 2s infinite;
+}
+
+@keyframes source-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* Hardware Telemetry Grid — 2x2 layout for power/temp/GPU/VRAM cards */
+.hardware-telemetry-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.telemetry-card {
+    position: relative;
+    overflow: hidden;
+}
+
+.telemetry-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, currentColor, transparent);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.telemetry-card.telemetry-active::after {
+    opacity: 0.4;
+    animation: telemetry-bar-pulse 3s ease-in-out infinite;
+}
+
+@keyframes telemetry-bar-pulse {
+    0%, 100% { opacity: 0.2; }
+    50% { opacity: 0.5; }
+}
+
+/* Temperature warning states */
+.telemetry-card.temp-warn {
+    border-color: rgba(251, 191, 36, 0.4) !important;
+}
+
+.telemetry-card.temp-throttle {
+    border-color: rgba(244, 63, 94, 0.5) !important;
+    animation: temp-alert 1s ease-in-out infinite;
+}
+
+@keyframes temp-alert {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+    50% { box-shadow: 0 0 12px 2px rgba(244, 63, 94, 0.15); }
+}
