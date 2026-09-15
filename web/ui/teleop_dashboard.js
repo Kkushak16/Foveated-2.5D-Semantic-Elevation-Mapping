@@ -2846,6 +2846,10 @@ function showPageView(viewId) {
         }
         // Dashboard view owns the scroll container; reset to top.
         window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+    } else if (viewId === 'hardware') {
+        document.body.classList.remove('landing-active');
+        document.getElementById('hardware-view').classList.add('active');
+        window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
     } else {
         document.body.classList.add('landing-active');
         document.getElementById('landing-view').classList.add('active');
@@ -3300,12 +3304,100 @@ window.switchCodeTab = switchCodeTab;
         }
     }
 
+    // --- Qwen3-VL Vision Navigator Auto-Pilot Integration ---
+    let qwenAutopilotActive = false;
+
+    window.toggleQwenAutoPilot = async function() {
+        qwenAutopilotActive = !qwenAutopilotActive;
+        const btn = document.getElementById('btn-autopilot-qwen');
+        const btnText = document.getElementById('autopilot-btn-text');
+        const badge = document.getElementById('qwen-autopilot-badge');
+
+        if (btn) {
+            if (qwenAutopilotActive) {
+                btn.style.borderColor = 'rgba(74, 222, 128, 0.8)';
+                btn.style.background = 'rgba(74, 222, 128, 0.2)';
+                if (btnText) btnText.textContent = '🚀 AUTO-PILOT: ACTIVE';
+            } else {
+                btn.style.borderColor = 'rgba(56, 189, 248, 0.5)';
+                btn.style.background = 'rgba(56, 189, 248, 0.08)';
+                if (btnText) btnText.textContent = '🤖 Auto-Pilot: OFF';
+            }
+        }
+
+        if (badge) {
+            if (qwenAutopilotActive) {
+                badge.textContent = 'AUTONOMOUS';
+                badge.style.background = 'rgba(74, 222, 128, 0.25)';
+                badge.style.color = '#4ade80';
+            } else {
+                badge.textContent = 'STANDBY';
+                badge.style.background = 'rgba(148, 163, 184, 0.15)';
+                badge.style.color = '#94a3b8';
+            }
+        }
+
+        try {
+            // Dispatch to Wave Rover Python Bridge (Port 8081)
+            await fetch('http://localhost:8081/api/rover/autopilot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: qwenAutopilotActive })
+            });
+        } catch (e) {
+            console.log('[Qwen3-VL] Auto-pilot command dispatched locally.');
+        }
+    };
+
+    async function pollQwenStatus() {
+        try {
+            const res = await fetch('http://localhost:8081/api/rover/autopilot');
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            const thoughtStream = document.getElementById('qwen-thought-stream');
+            const leftEl = document.getElementById('qwen-dist-left');
+            const centerEl = document.getElementById('qwen-dist-center');
+            const rightEl = document.getElementById('qwen-dist-right');
+            const badge = document.getElementById('qwen-autopilot-badge');
+            const btnText = document.getElementById('autopilot-btn-text');
+
+            if (data.pillars && thoughtStream) {
+                thoughtStream.textContent = data.pillars.deeper_thought || data.pillars.sharper_vision;
+            }
+            if (data.perception) {
+                if (leftEl) leftEl.textContent = `${data.perception.obstacle_left_dist_m.toFixed(1)} m`;
+                if (centerEl) {
+                    centerEl.textContent = `${data.perception.obstacle_center_dist_m.toFixed(1)} m`;
+                    centerEl.style.color = data.perception.hazard_detected ? '#ef4444' : '#4ade80';
+                }
+                if (rightEl) rightEl.textContent = `${data.perception.obstacle_right_dist_m.toFixed(1)} m`;
+            }
+            if (badge && typeof data.autopilot_active === 'boolean') {
+                if (data.autopilot_active) {
+                    badge.textContent = 'AUTONOMOUS';
+                    badge.style.background = 'rgba(74, 222, 128, 0.25)';
+                    badge.style.color = '#4ade80';
+                    if (btnText) btnText.textContent = '🚀 AUTO-PILOT: ACTIVE';
+                } else {
+                    badge.textContent = 'STANDBY';
+                    badge.style.background = 'rgba(148, 163, 184, 0.15)';
+                    badge.style.color = '#94a3b8';
+                    if (btnText) btnText.textContent = '🤖 Auto-Pilot: OFF';
+                }
+            }
+        } catch (e) {
+            // bridge not yet running
+        }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
         detectPlatform();
         // Start telemetry polling with a small initial delay
         setTimeout(() => {
             pollTelemetry();
             setInterval(pollTelemetry, POLL_INTERVAL_MS);
+            setInterval(pollQwenStatus, 600); // 1.6 Hz Qwen3-VL status poll
         }, 1500);
     });
 })();

@@ -320,24 +320,37 @@ For autonomous rovers, budget prototypes, and hackathons (e.g. Smart India Hacka
        └──────────────────────────────────────────────────────────────┘
 ```
 
-#### Quick Start on Raspberry Pi:
-1. **Connect Hardware:**
-   * Built-in ESP32 $\leftrightarrow$ Raspberry Pi via UART (`/dev/ttyS0`) or micro-USB cable (`/dev/ttyUSB0`).
-   * LiDAR $\leftrightarrow$ Raspberry Pi USB 3.0 port.
-   * Camera $\leftrightarrow$ Raspberry Pi CSI ribbon cable or USB port.
-   * 3x 18650 Li-ion cells installed in battery tray (*verify +/- polarity strictly!*).
-2. **Launch the Rover Perception Bridge:**
-   ```bash
-   chmod +x scripts/run_waverover.sh
-   ./scripts/run_waverover.sh
-   ```
-3. **Open from Any Laptop/Tablet (Zero-Install):**
-   Connect to the same Wi-Fi network and open in Chrome / Edge:
-   ```
-   http://<rover-ip>:8080
-   ```
-   * Live Camera Stream: `http://<rover-ip>:8081/video_feed`
-   * Autonomous safety bubble prevents collisions by triggering emergency brakes at $<0.6\text{m}$.
+#### Quick Start with Hardware Integration Engine:
+The frontend includes a built-in **Hardware Integration Engine** accessible at `http://localhost:8090` via the **"🔌 Connect Hardware"** button:
+
+1. **Step 1 · Choose Hardware:**
+   - **Arduino Uno Q (Recommended):** Dual-Core MCU with native USB-C, high-precision PWM motor drive & encoder feedback.
+   - **Raspberry Pi 4 / 5:** High-performance Linux SBC running Python telemetry bridge.
+   - **Arduino Uno R3 / R4 WiFi:** Classic microcontroller with motor shield.
+   - **ESP32 (Wave Rover Onboard):** Factory dual-core MCU connected via Micro-USB or Wi-Fi AP.
+   - **Custom Robot:** Any differential drive chassis communicating via 115200 baud JSON serial.
+   - **Auto-Detect:** Click `⚡ Scan & Auto-Connect` to probe local ports and launch the session.
+
+2. **Step 2 · Interactive Setup Guide & Pinouts:**
+   - Interactive board switcher tabs to view tailored wiring diagrams and commands.
+   - Exact pin mapping for motors, encoders, and thermal sensors.
+   - 1-click compile and upload commands using `arduino-cli` / `platformio`.
+
+3. **Step 3 · Connect & Live Dashboard:**
+   - **Low-Latency Video Feed:** Streaming with Qwen3-VL neural detection HUD.
+   - **2.5D Concentric Ring BEV:** Near (0–10m), Mid (10–30m), Far (30–100m) occupancy grid.
+   - **Live Telemetry:** Stream FPS (~30 FPS), Roundtrip Ping (~2–4 ms), Board/SoC Temperature (°C), Battery Voltage (V).
+   - **Direct Drive Teleop:** Interactive on-screen WASD buttons and keyboard arrow keys with emergency stop.
+   - **Simulation Mode Fallback:** Automatically active when physical bridge is offline so all UI elements and driving controls can be tested immediately.
+
+#### Pure-Vision Mapping Without LiDAR (Qwen3-VL):
+Physical LiDAR hardware is **100% optional**. If a LiDAR sensor is not connected, the system engages **Qwen3-VL ("Sharper Vision, Deeper Thought, Broader Action")** to perform monocular spatial depth reasoning, construct the concentric occupancy grid from camera frames, and navigate autonomously along collision-free paths.
+
+#### Starting the Python Bridge (Physical Hardware):
+```bash
+# Windows / Linux / macOS
+python python/waverover_bridge.py --port COM3   # or /dev/ttyACM0 / /dev/ttyUSB0
+```
 
 ---
 

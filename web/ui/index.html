@@ -34,9 +34,18 @@
             <a href="#features" data-scroll-to="features">Features</a>
             <a href="#architecture" data-scroll-to="architecture">Architecture</a>
             <a href="#benchmarks" data-scroll-to="benchmarks">Telemetry Specs</a>
+            <a href="#" onclick="event.preventDefault(); showPageView('hardware')">Connect Hardware</a>
         </div>
 
         <div class="nav-actions">
+            <button class="interactive-hover-btn nav-cta-btn" onclick="showPageView('hardware')" style="margin-right:8px;">
+                <span class="btn-text">🔌 Connect Hardware</span>
+                <div class="btn-hover-content">
+                    <span>🔌 Connect Hardware</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                </div>
+                <div class="btn-bg-expand"></div>
+            </button>
             <button class="interactive-hover-btn nav-cta-btn" onclick="showPageView('dashboard')">
                 <span class="btn-text">Launch Teleop HUD</span>
                 <div class="btn-hover-content">
@@ -80,6 +89,11 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                         </div>
                         <div class="btn-bg-expand"></div>
+                    </button>
+
+                    <button class="interactive-hover-btn secondary-hero-btn" onclick="showPageView('hardware')" style="background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;">
+                        <span>🔌 Connect Hardware</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                     </button>
 
                     <a href="#architecture" data-scroll-to="architecture" class="secondary-hero-btn">
@@ -272,6 +286,1087 @@ void process_scan(const FoveatedPointBuffer& scan) {
     </main>
 
 
+    <!-- PAGE VIEW 3: Hardware Connection Wizard & Live Rover Dashboard -->
+    <div id="hardware-view" class="page-view">
+        <style>
+            /* ========= Hardware Connect View — Obsidian Glassmorphism Design ========= */
+            #hardware-view {
+                background-color: var(--bg-base, #040405);
+                background-image: 
+                    radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.06) 0%, transparent 55%),
+                    radial-gradient(circle at 50% 40%, rgba(217, 119, 6, 0.03) 0%, transparent 65%);
+                min-height: 100vh;
+                padding-top: 80px;
+                padding-bottom: 60px;
+                color: var(--text-primary, #ffffff);
+                font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif);
+            }
+            .hw-container {
+                max-width: 1140px;
+                margin: 0 auto;
+                padding: 0 24px;
+            }
+            .hw-top-bar {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 24px;
+            }
+            .hw-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.09);
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                padding: 6px 14px;
+                border-radius: 24px;
+                font-size: 0.78rem;
+                font-family: var(--font-mono, monospace);
+                color: var(--text-secondary, #a1a1aa);
+                margin-bottom: 16px;
+            }
+            .hw-badge-highlight {
+                color: var(--accent-amber, #f59e0b);
+                font-weight: 600;
+            }
+            .hw-title {
+                font-size: 2.5rem;
+                font-weight: 700;
+                line-height: 1.15;
+                letter-spacing: -0.035em;
+                color: #ffffff;
+                margin-bottom: 14px;
+            }
+            .hw-subtitle {
+                font-size: 1.05rem;
+                color: var(--text-secondary, #a1a1aa);
+                line-height: 1.6;
+                max-width: 820px;
+                margin-bottom: 32px;
+                font-weight: 400;
+            }
+            .hw-highlight-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 36px;
+            }
+            @media (max-width: 800px) {
+                .hw-highlight-grid { grid-template-columns: 1fr; }
+            }
+            .hw-info-card {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 20px 22px;
+                box-shadow: var(--shadow-card, 0 10px 30px rgba(0, 0, 0, 0.6));
+                position: relative;
+                overflow: hidden;
+            }
+            .hw-info-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.5), transparent);
+            }
+            .hw-info-card h4 {
+                font-size: 0.95rem;
+                font-weight: 700;
+                color: #ffffff;
+                margin-bottom: 8px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .hw-info-card p {
+                font-size: 0.82rem;
+                color: var(--text-secondary, #a1a1aa);
+                line-height: 1.55;
+            }
+            .hw-info-card strong {
+                color: #ffffff;
+            }
+            .hw-steps-bar {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                background: rgba(0, 0, 0, 0.45);
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                padding: 6px;
+                border-radius: 12px;
+                margin-bottom: 30px;
+                width: fit-content;
+            }
+            .hw-step-pill {
+                padding: 7px 18px;
+                border-radius: 8px;
+                font-size: 0.82rem;
+                font-weight: 500;
+                font-family: var(--font-sans, sans-serif);
+                color: var(--text-secondary, #a1a1aa);
+                background: transparent;
+                border: 1px solid transparent;
+                cursor: pointer;
+                transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            .hw-step-pill:hover {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+                border-color: rgba(255, 255, 255, 0.15);
+            }
+            .hw-step-pill.active {
+                background: var(--bg-card-hover, rgba(28, 28, 35, 0.85));
+                color: var(--text-primary, #ffffff);
+                border-color: rgba(245, 158, 11, 0.4);
+                font-weight: 600;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            }
+            .hw-step-pill.done {
+                background: rgba(16, 185, 129, 0.08);
+                color: var(--accent-green, #34d399);
+                border-color: rgba(16, 185, 129, 0.2);
+            }
+            .hw-step-divider {
+                color: rgba(255, 255, 255, 0.15);
+                font-size: 0.8rem;
+            }
+            .hw-step-bottom-bar {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 16px;
+                flex-wrap: wrap;
+                margin-top: 24px;
+                padding-top: 20px;
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .hw-guide-tabs {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                margin-bottom: 20px;
+                padding-bottom: 16px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .hw-guide-tab {
+                padding: 7px 14px;
+                border-radius: 8px;
+                font-size: 0.78rem;
+                font-weight: 600;
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                color: var(--text-secondary, #a1a1aa);
+                cursor: pointer;
+                transition: all 0.2s ease;
+                font-family: var(--font-sans, sans-serif);
+            }
+            .hw-guide-tab:hover {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+                border-color: rgba(255, 255, 255, 0.2);
+            }
+            .hw-guide-tab.active {
+                background: rgba(245, 158, 11, 0.15);
+                color: var(--accent-amber, #f59e0b);
+                border-color: rgba(245, 158, 11, 0.4);
+                box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+            }
+            .hw-card-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+                gap: 16px;
+                margin-bottom: 24px;
+            }
+            .hw-card {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 22px 20px;
+                cursor: pointer;
+                transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+                position: relative;
+                overflow: hidden;
+            }
+            .hw-card:hover {
+                background: var(--bg-card-hover, rgba(28, 28, 35, 0.85));
+                border-color: rgba(255, 255, 255, 0.18);
+                transform: translateY(-2px);
+                box-shadow: var(--shadow-card, 0 10px 30px rgba(0, 0, 0, 0.7));
+            }
+            .hw-card.selected {
+                background: rgba(28, 28, 35, 0.95);
+                border-color: var(--accent-amber, #f59e0b);
+                box-shadow: 0 0 24px rgba(245, 158, 11, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            }
+            .hw-card-badge {
+                position: absolute;
+                top: 14px;
+                right: 14px;
+                font-size: 0.68rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                padding: 3px 8px;
+                border-radius: 6px;
+                background: rgba(245, 158, 11, 0.15);
+                color: var(--accent-amber, #f59e0b);
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                font-family: var(--font-mono, monospace);
+            }
+            .hw-card-icon {
+                font-size: 2rem;
+                margin-bottom: 12px;
+            }
+            .hw-card-title {
+                font-size: 1.05rem;
+                font-weight: 700;
+                color: #ffffff;
+                margin-bottom: 6px;
+                letter-spacing: -0.015em;
+            }
+            .hw-card-desc {
+                font-size: 0.8rem;
+                color: var(--text-secondary, #a1a1aa);
+                line-height: 1.5;
+            }
+            .hw-hardware-spec-box {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 24px;
+                margin-bottom: 32px;
+            }
+            .hw-spec-title {
+                font-size: 0.72rem;
+                font-weight: 700;
+                color: var(--text-muted, #71717a);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 14px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .hw-spec-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 12px;
+            }
+            .hw-spec-item {
+                background: rgba(0, 0, 0, 0.35);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 10px;
+                padding: 12px 14px;
+            }
+            .hw-spec-name {
+                font-size: 0.76rem;
+                font-weight: 600;
+                color: #ffffff;
+                margin-bottom: 3px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .hw-spec-desc {
+                font-size: 0.72rem;
+                color: var(--text-secondary, #a1a1aa);
+                line-height: 1.45;
+            }
+            .hw-instructions-box {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 26px;
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-card, 0 10px 30px rgba(0, 0, 0, 0.6));
+            }
+            .hw-instructions-box h3 {
+                font-size: 1.15rem;
+                font-weight: 700;
+                color: #ffffff;
+                margin-bottom: 16px;
+                letter-spacing: -0.02em;
+            }
+            .hw-instructions-box ol {
+                padding-left: 20px;
+                color: var(--text-secondary, #a1a1aa);
+                font-size: 0.88rem;
+                line-height: 1.75;
+            }
+            .hw-instructions-box ol li {
+                margin-bottom: 8px;
+            }
+            .hw-instructions-box ol li b {
+                color: #ffffff;
+            }
+            .hw-instructions-box code {
+                background: rgba(0, 0, 0, 0.5);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: var(--accent-gold, #fbbf24);
+                padding: 2px 7px;
+                border-radius: 5px;
+                font-family: var(--font-mono, monospace);
+                font-size: 0.8rem;
+            }
+            .hw-connect-panel {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 24px;
+                margin-bottom: 24px;
+                box-shadow: var(--shadow-card, 0 10px 30px rgba(0, 0, 0, 0.6));
+            }
+            .hw-connect-row {
+                display: flex;
+                gap: 14px;
+                align-items: center;
+                flex-wrap: wrap;
+                margin-bottom: 16px;
+            }
+            .hw-input {
+                background: rgba(0, 0, 0, 0.5);
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+                border-radius: 10px;
+                padding: 10px 14px;
+                color: #ffffff;
+                font-size: 0.85rem;
+                font-family: var(--font-mono, monospace);
+                outline: none;
+                transition: all 0.2s ease;
+                min-width: 220px;
+            }
+            .hw-input:focus {
+                border-color: var(--accent-amber, #f59e0b);
+                box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+            }
+            .hw-btn-primary {
+                background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+                color: #000000;
+                font-weight: 700;
+                font-size: 0.86rem;
+                padding: 10px 22px;
+                border-radius: 10px;
+                border: none;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                box-shadow: 0 4px 14px rgba(217, 119, 6, 0.25);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .hw-btn-primary:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 6px 20px rgba(217, 119, 6, 0.4);
+            }
+            .hw-btn-primary:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+                transform: none;
+            }
+            .hw-btn-secondary {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.14);
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 0.86rem;
+                padding: 10px 20px;
+                border-radius: 10px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .hw-btn-secondary:hover {
+                background: rgba(255, 255, 255, 0.1);
+                border-color: rgba(255, 255, 255, 0.25);
+            }
+            .hw-status-dot {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                margin-right: 6px;
+            }
+            .hw-status-dot.disconnected { background: #71717a; }
+            .hw-status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+            .hw-status-dot.connected { background: #10b981; box-shadow: 0 0 10px #10b981; }
+            .hw-live-dash {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+                margin-bottom: 20px;
+            }
+            @media (max-width: 800px) {
+                .hw-live-dash { grid-template-columns: 1fr; }
+            }
+            .hw-live-panel {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                overflow: hidden;
+            }
+            .hw-live-panel-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 18px;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .hw-live-panel-title {
+                font-size: 0.74rem;
+                font-weight: 700;
+                color: var(--text-muted, #71717a);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+            .hw-live-panel-body {
+                padding: 12px;
+                min-height: 280px;
+                position: relative;
+            }
+            .hw-live-panel-body img, .hw-live-panel-body canvas {
+                width: 100%;
+                height: 270px;
+                object-fit: cover;
+                border-radius: 8px;
+                background: #000000;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+            }
+            .hw-metrics-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 12px;
+                margin-bottom: 20px;
+            }
+            @media (max-width: 800px) {
+                .hw-metrics-grid { grid-template-columns: repeat(2, 1fr); }
+            }
+            .hw-metric-card {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 12px;
+                padding: 16px 18px;
+                text-align: center;
+                transition: border-color 0.25s ease;
+            }
+            .hw-metric-card:hover {
+                border-color: rgba(255, 255, 255, 0.18);
+            }
+            .hw-metric-label {
+                font-size: 0.7rem;
+                font-weight: 600;
+                color: var(--text-muted, #71717a);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 6px;
+            }
+            .hw-metric-value {
+                font-size: 1.45rem;
+                font-weight: 700;
+                color: #ffffff;
+                font-family: var(--font-sans, sans-serif);
+                letter-spacing: -0.02em;
+            }
+            .hw-metric-sub {
+                font-size: 0.7rem;
+                color: var(--text-secondary, #a1a1aa);
+                margin-top: 4px;
+            }
+            .hw-tab-bar {
+                display: flex;
+                gap: 4px;
+                margin-bottom: 16px;
+                background: rgba(0, 0, 0, 0.45);
+                padding: 4px;
+                border-radius: 10px;
+                border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+                width: fit-content;
+            }
+            .hw-tab {
+                padding: 8px 18px;
+                border-radius: 7px;
+                font-size: 0.8rem;
+                font-weight: 500;
+                color: var(--text-secondary, #a1a1aa);
+                cursor: pointer;
+                border: none;
+                background: transparent;
+                transition: all 0.22s ease;
+                font-family: var(--font-sans, sans-serif);
+            }
+            .hw-tab.active {
+                background: var(--bg-card-hover, rgba(28, 28, 35, 0.85));
+                color: #ffffff;
+                font-weight: 600;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+            }
+            .hw-teleop-btn {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 0.84rem;
+                padding: 10px 18px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-family: var(--font-mono, monospace);
+                transition: all 0.18s ease;
+            }
+            .hw-teleop-btn:hover {
+                background: rgba(245, 158, 11, 0.15);
+                border-color: rgba(245, 158, 11, 0.4);
+                color: #fbbf24;
+            }
+            .hw-teleop-btn:active {
+                transform: scale(0.96);
+            }
+            .hw-teleop-stop {
+                background: rgba(239, 68, 68, 0.18);
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                color: #fca5a5;
+            }
+            .hw-teleop-stop:hover {
+                background: rgba(239, 68, 68, 0.3);
+                border-color: rgba(239, 68, 68, 0.6);
+                color: #ffffff;
+            }
+            .hw-card-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 16px;
+            }
+            .hw-card-btn-instruct {
+                flex: 1;
+                padding: 8px 10px;
+                border-radius: 8px;
+                font-size: 0.74rem;
+                font-weight: 600;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                color: #ffffff;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                font-family: var(--font-sans);
+            }
+            .hw-card-btn-instruct:hover {
+                background: rgba(255, 255, 255, 0.12);
+                border-color: rgba(255, 255, 255, 0.25);
+            }
+            .hw-card-btn-connect {
+                flex: 1;
+                padding: 8px 10px;
+                border-radius: 8px;
+                font-size: 0.74rem;
+                font-weight: 700;
+                background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+                border: none;
+                color: #000000;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 5px;
+                font-family: var(--font-sans);
+                box-shadow: 0 2px 8px rgba(217, 119, 6, 0.25);
+            }
+            .hw-card-btn-connect:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 4px 14px rgba(217, 119, 6, 0.4);
+            }
+            .hw-auto-scan-bar {
+                background: var(--bg-card, rgba(18, 18, 22, 0.75));
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                backdrop-filter: var(--glass-blur, blur(24px));
+                -webkit-backdrop-filter: var(--glass-blur, blur(24px));
+                border-radius: 14px;
+                padding: 16px 20px;
+                margin-bottom: 24px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 16px;
+                flex-wrap: wrap;
+            }
+            .hw-section-hidden { display: none !important; }
+        </style>
+
+        <div class="hw-container">
+            <!-- Navigation Back Button -->
+            <div class="hw-top-bar">
+                <button class="interactive-hover-btn" style="padding: 6px 16px; font-size: 0.82rem;" onclick="showPageView('landing')">
+                    <span class="btn-text">← Back to Overview</span>
+                    <div class="btn-hover-content">
+                        <span>← Back to Overview</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 12H5"></path><path d="m12 19-7-7 7-7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+
+                <button class="interactive-hover-btn" style="padding: 6px 16px; font-size: 0.82rem;" onclick="showPageView('dashboard')">
+                    <span class="btn-text">🚀 Open Teleop HUD</span>
+                    <div class="btn-hover-content">
+                        <span>🚀 Open Teleop HUD</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+            </div>
+
+            <!-- Header & Headline -->
+            <div class="hw-badge">
+                <span class="hw-badge-highlight">🔌 HARDWARE INTEGRATION ENGINE</span>
+                <span style="opacity:0.35;">|</span>
+                <span>Wave Rover • Arduino Uno Q • Raspberry Pi • ESP32</span>
+            </div>
+
+            <h1 class="hw-title">
+                Connect Hardware & <br>
+                <span class="gradient-text">Live Robot Telemetry</span>
+            </h1>
+
+            <p class="hw-subtitle">
+                Pair your mobile robot or microcontroller with the real-time perception pipeline. Configure your hardware, view setup instructions, inspect live camera streaming, monitor SoC thermals, and pilot the rover using vision autopilot.
+            </p>
+
+            <!-- Prominent Feature Cards: Where to see Camera Feed & Qwen3-VL LiDAR-Free Mapping -->
+            <div class="hw-highlight-grid">
+                <!-- Card 1: Where Camera Feed Appears -->
+                <div class="hw-info-card">
+                    <h4>
+                        <span style="color: var(--accent-amber);">📹</span>
+                        Where Will You See The Camera Feed?
+                    </h4>
+                    <p>
+                        Once your hardware is connected, your live camera video stream appears in <strong>two distinct places</strong>:
+                    </p>
+                    <p style="margin-top: 8px;">
+                        • <strong>In-Wizard Live Viewport (Step 3 below)</strong>: Instant low-latency MJPEG streaming alongside the 2.5D concentric ring BEV occupancy grid, FPS counter, and latency metrics.<br>
+                        • <strong>Primary Teleoperation HUD Dashboard</strong>: Click <strong>"Launch Teleop HUD"</strong> to open the full mission control cockpit. The camera feed is displayed on the main central HUD canvas with real-time <strong>Qwen3-VL neural bounding boxes</strong>, 3D obstacle tags, and 2.5D point cloud projection.
+                    </p>
+                </div>
+
+                <!-- Card 2: Pure Vision Mapping via Qwen3-VL without LiDAR -->
+                <div class="hw-info-card">
+                    <h4>
+                        <span style="color: var(--accent-amber);">🧠</span>
+                        No LiDAR Sensor? Qwen3-VL Maps Purely From Vision
+                    </h4>
+                    <p>
+                        <strong>Physical LiDAR is 100% optional.</strong> If a LiDAR sensor is not connected to your rover, our system automatically activates <strong>Qwen3-VL ("Sharper Vision, Deeper Thought, Broader Action")</strong>.
+                    </p>
+                    <p style="margin-top: 8px;">
+                        Qwen3-VL inspects the live video feed frame-by-frame, performs monocular spatial depth reasoning, estimates clearance across 3 concentric safety rings (Near 0-10m, Mid 10-30m, Far 30-100m), constructs a dynamic BEV occupancy grid, and steers the rover along collision-free paths — achieving pure vision-based autonomous navigation without requiring LiDAR hardware.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Supported Hardware Overview Box -->
+            <div class="hw-hardware-spec-box">
+                <div class="hw-spec-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+                    Supported Hardware Categories & Compatibility
+                </div>
+                <div class="hw-spec-grid">
+                    <div class="hw-spec-item">
+                        <div class="hw-spec-name">🤖 Microcontrollers</div>
+                        <div class="hw-spec-desc"><strong>Arduino Uno Q</strong> (Flagship USB-C), Arduino Uno R3 / R4 WiFi, ESP32 Onboard, STM32, Teensy, RP2040. Communicates via JSON-Serial at 115200 baud.</div>
+                    </div>
+                    <div class="hw-spec-item">
+                        <div class="hw-spec-name">🍓 Companion SBCs</div>
+                        <div class="hw-spec-desc"><strong>Raspberry Pi 4 / 5</strong>, NVIDIA Jetson Nano / Orin, Orange Pi. Runs Python Flask bridge directly onboard with SoC temperature telemetry.</div>
+                    </div>
+                    <div class="hw-spec-item">
+                        <div class="hw-spec-name">📹 Vision & Cameras</div>
+                        <div class="hw-spec-desc">Any standard USB UVC webcam (720p/1080p), Raspberry Pi Camera Module (CSI Ribbon v2/v3/HQ), ESP32-CAM, or RTSP/HTTP MJPEG stream.</div>
+                    </div>
+                    <div class="hw-spec-item">
+                        <div class="hw-spec-name">🏎️ Chassis & LiDAR</div>
+                        <div class="hw-spec-desc">Waveshare Wave Rover (4WD tracked chassis with optical encoders) or custom differential drive. Optional LiDAR: RPLIDAR A1/A2, or <strong>LiDAR-free via Qwen3-VL</strong>.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step Indicator Bar -->
+            <div class="hw-steps-bar">
+                <button class="hw-step-pill active" id="hw-step-1" onclick="hwGoToStep(1)">1 · Choose Hardware</button>
+                <span class="hw-step-divider">›</span>
+                <button class="hw-step-pill" id="hw-step-2" onclick="hwGoToStep(2)">2 · Setup Guide</button>
+                <span class="hw-step-divider">›</span>
+                <button class="hw-step-pill" id="hw-step-3" onclick="hwGoToStep(3)">3 · Connect & Live Feed</button>
+            </div>
+
+            <!-- ========== STEP 1: Select Hardware ========== -->
+            <div id="hw-section-select" class="hw-section">
+
+                <!-- One-Click Auto-Detect Bar -->
+                <div class="hw-auto-scan-bar">
+                    <div>
+                        <div style="font-size:0.92rem; font-weight:700; color:#ffffff; display:flex; align-items:center; gap:8px;">
+                            <span style="color:var(--accent-amber);">⚡</span> Auto-Detect Connected Hardware
+                        </div>
+                        <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:3px;">
+                            Plug your Arduino Uno Q, ESP32, or Raspberry Pi into your laptop, and click below to automatically scan ports and connect without manual setup.
+                        </div>
+                    </div>
+                    <button class="hw-btn-primary" onclick="hwScanAndAutoConnect()" id="btn-auto-detect-scan" style="white-space:nowrap; padding: 10px 20px;">
+                        ⚡ Scan & Auto-Connect
+                    </button>
+                </div>
+
+                <div class="panel-title" style="margin-bottom: 16px; border: none; padding: 0;">
+                    Choose a hardware option to view instructions or automatically connect:
+                </div>
+
+                <div class="hw-card-grid">
+                    <!-- Arduino Uno Q -->
+                    <div class="hw-card" onclick="hwSelectDevice('arduino-uno-q')" id="hw-card-arduino-uno-q">
+                        <span class="hw-card-badge">RECOMMENDED</span>
+                        <div class="hw-card-icon">🤖</div>
+                        <div class="hw-card-title">Arduino Uno Q</div>
+                        <div class="hw-card-desc">The newly launched Arduino Uno Q with native USB-C. High-precision hardware PWM motor control, dual encoder tracking, and Qwen3-VL vision autopilot.</div>
+                        <div class="hw-card-actions">
+                            <button class="hw-card-btn-instruct" onclick="event.stopPropagation(); hwSelectDevice('arduino-uno-q');">
+                                📖 Instructions
+                            </button>
+                            <button class="hw-card-btn-connect" onclick="event.stopPropagation(); hwAutoConnectDevice('arduino-uno-q');">
+                                ⚡ Auto-Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Arduino Uno R3 / R4 -->
+                    <div class="hw-card" onclick="hwSelectDevice('arduino-uno-r4')" id="hw-card-arduino-uno-r4">
+                        <div class="hw-card-icon">🔧</div>
+                        <div class="hw-card-title">Arduino Uno R3 / R4</div>
+                        <div class="hw-card-desc">Classic ATMega328P Uno R3 or Renesas RA4M1 R4 WiFi. Connects via USB Serial or WiFi TCP socket for motor drive and sensor telemetry streaming.</div>
+                        <div class="hw-card-actions">
+                            <button class="hw-card-btn-instruct" onclick="event.stopPropagation(); hwSelectDevice('arduino-uno-r4');">
+                                📖 Instructions
+                            </button>
+                            <button class="hw-card-btn-connect" onclick="event.stopPropagation(); hwAutoConnectDevice('arduino-uno-r4');">
+                                ⚡ Auto-Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Raspberry Pi -->
+                    <div class="hw-card" onclick="hwSelectDevice('raspberry-pi')" id="hw-card-raspberry-pi">
+                        <span class="hw-card-badge">ONBOARD SBC</span>
+                        <div class="hw-card-icon">🍓</div>
+                        <div class="hw-card-title">Raspberry Pi 4 / 5</div>
+                        <div class="hw-card-desc">Full Linux SBC mounted directly onto the Wave Rover. Runs Python perception, CSI camera streaming, and Flask telemetry bridge over local WiFi.</div>
+                        <div class="hw-card-actions">
+                            <button class="hw-card-btn-instruct" onclick="event.stopPropagation(); hwSelectDevice('raspberry-pi');">
+                                📖 Instructions
+                            </button>
+                            <button class="hw-card-btn-connect" onclick="event.stopPropagation(); hwAutoConnectDevice('raspberry-pi');">
+                                ⚡ Auto-Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ESP32 Factory -->
+                    <div class="hw-card" onclick="hwSelectDevice('esp32')" id="hw-card-esp32">
+                        <div class="hw-card-icon">📡</div>
+                        <div class="hw-card-title">ESP32 (Wave Rover Onboard)</div>
+                        <div class="hw-card-desc">The Waveshare Wave Rover factory pre-installed dual-core ESP32 board. Connects via Micro-USB serial or WiFi access point with internal temperature sensing.</div>
+                        <div class="hw-card-actions">
+                            <button class="hw-card-btn-instruct" onclick="event.stopPropagation(); hwSelectDevice('esp32');">
+                                📖 Instructions
+                            </button>
+                            <button class="hw-card-btn-connect" onclick="event.stopPropagation(); hwAutoConnectDevice('esp32');">
+                                ⚡ Auto-Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Custom / Other -->
+                    <div class="hw-card" onclick="hwSelectDevice('custom')" id="hw-card-custom">
+                        <div class="hw-card-icon">⚙️</div>
+                        <div class="hw-card-title">Custom MCU / Robot</div>
+                        <div class="hw-card-desc">Any custom robot chassis or microcontroller (STM32, Teensy, RP2040) communicating via JSON Serial or TCP at 115200 baud.</div>
+                        <div class="hw-card-actions">
+                            <button class="hw-card-btn-instruct" onclick="event.stopPropagation(); hwSelectDevice('custom');">
+                                📖 Instructions
+                            </button>
+                            <button class="hw-card-btn-connect" onclick="event.stopPropagation(); hwAutoConnectDevice('custom');">
+                                ⚡ Auto-Connect
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 1 Bottom Action Controls -->
+                <div class="hw-step-bottom-bar">
+                    <div style="font-size:0.84rem; color:var(--text-secondary);">
+                        Currently Selected: <strong id="hw-step1-selected-label" style="color:var(--accent-amber);">Arduino Uno Q (Recommended)</strong>
+                    </div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="hw-btn-secondary" onclick="hwGoToStep(2)">
+                            📖 View Setup Guide →
+                        </button>
+                        <button class="hw-btn-primary" onclick="hwAutoConnectDevice(hwSelectedDevice || 'arduino-uno-q')">
+                            ⚡ Auto-Connect Selected Board
+                        </button>
+                        <button class="hw-btn-secondary" onclick="hwLaunchMockSimulation(); hwGoToStep(3);">
+                            🧪 Test Simulation Mode
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ========== STEP 2: Setup Instructions ========== -->
+            <div id="hw-section-instructions" class="hw-section hw-section-hidden">
+                <div class="hw-instructions-box" id="hw-instructions-content">
+                    <!-- Dynamically populated by JS based on selected device -->
+                </div>
+                <div class="hw-step-bottom-bar">
+                    <button class="hw-btn-secondary" onclick="hwGoToStep(1)">← Back to Hardware Options</button>
+                    <button class="hw-btn-primary" id="btn-step2-autoconnect" onclick="hwAutoConnectDevice(hwSelectedDevice || 'arduino-uno-q')">
+                        ⚡ Auto-Connect to This Board Now
+                    </button>
+                    <button class="hw-btn-secondary" onclick="hwGoToStep(3)">Proceed to Live Feed & Controls →</button>
+                </div>
+            </div>
+
+            <!-- ========== STEP 3: Connect & Live Dashboard ========== -->
+            <div id="hw-section-connect" class="hw-section hw-section-hidden">
+                <!-- Connection Panel -->
+                <div class="hw-connect-panel">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+                        <div>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: #ffffff;" id="hw-connect-panel-title">Rover Bridge Connection</div>
+                            <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px;">Connect to the Python telemetry bridge (<code>waverover_bridge.py</code>) running locally or on the rover.</div>
+                        </div>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="hw-btn-secondary" style="font-size: 0.78rem; padding: 6px 14px;" onclick="hwGoToStep(1)">
+                                🔄 Switch Hardware
+                            </button>
+                            <button class="hw-btn-secondary" style="font-size: 0.78rem; padding: 6px 14px;" onclick="showPageView('dashboard')">
+                                🚀 Switch to Full Teleop HUD
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="hw-connect-row">
+                        <div>
+                            <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Bridge Endpoint (HTTP / WS)</label>
+                            <input type="text" class="hw-input" id="hw-bridge-host" value="http://localhost:8081" placeholder="http://localhost:8081">
+                        </div>
+                        <div>
+                            <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Serial Port / Auto-Detect</label>
+                            <input type="text" class="hw-input" id="hw-serial-port" value="Auto-Detect" placeholder="COM3 or /dev/ttyUSB0" style="min-width:160px;">
+                        </div>
+                        <div style="margin-top: 20px;">
+                            <button class="hw-btn-primary" id="hw-btn-connect" onclick="hwAttemptConnect()">🔌 Connect to Rover</button>
+                        </div>
+                    </div>
+
+                    <div id="hw-connection-status" style="font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+                        <span class="hw-status-dot disconnected" id="hw-status-dot"></span>
+                        <span id="hw-status-text">Not connected — Enter bridge endpoint and click Connect</span>
+                    </div>
+                </div>
+
+                <!-- Live Dashboard (Active upon connection) -->
+                <div id="hw-live-dashboard" style="display: none;">
+
+                    <!-- Camera & Teleop Notice Banner -->
+                    <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 10px; padding: 12px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                        <div style="font-size: 0.82rem; color: #ffffff;">
+                            <strong style="color: var(--accent-amber);">Live Hardware Feed Active:</strong> Streaming real-time camera & BEV occupancy grid below. You can also monitor this feed with full Qwen3-VL 2.5D foveated perception in the cockpit.
+                        </div>
+                        <button class="hw-btn-primary" style="padding: 6px 14px; font-size: 0.76rem;" onclick="showPageView('dashboard')">
+                            Open Full Teleop Cockpit →
+                        </button>
+                    </div>
+
+                    <!-- Metrics Row: FPS, Latency, Board Temp, Battery -->
+                    <div class="hw-metrics-grid">
+                        <div class="hw-metric-card">
+                            <div class="hw-metric-label">Stream FPS</div>
+                            <div class="hw-metric-value" id="hw-m-fps" style="color: #ffffff;">—</div>
+                            <div class="hw-metric-sub">Camera Throughput</div>
+                        </div>
+                        <div class="hw-metric-card">
+                            <div class="hw-metric-label">Roundtrip Latency</div>
+                            <div class="hw-metric-value" id="hw-m-latency" style="color: var(--accent-green, #34d399);">—</div>
+                            <div class="hw-metric-sub">Serial / HTTP Ping</div>
+                        </div>
+                        <div class="hw-metric-card">
+                            <div class="hw-metric-label">Board Temperature</div>
+                            <div class="hw-metric-value" id="hw-m-temp" style="color: var(--accent-amber, #f59e0b);">—</div>
+                            <div class="hw-metric-sub" id="hw-m-temp-sub">SoC / MCU Internal Temp</div>
+                        </div>
+                        <div class="hw-metric-card">
+                            <div class="hw-metric-label">Battery Level</div>
+                            <div class="hw-metric-value" id="hw-m-battery" style="color: #ffffff;">—</div>
+                            <div class="hw-metric-sub" id="hw-m-battery-sub">Pack Voltage (2S / 3S)</div>
+                        </div>
+                    </div>
+
+                    <!-- Tab Switcher Bar -->
+                    <div class="hw-tab-bar">
+                        <button class="hw-tab active" onclick="hwSwitchLiveTab('camera', this)">📹 Real-Time Camera</button>
+                        <button class="hw-tab" onclick="hwSwitchLiveTab('bev', this)">🗺️ BEV Grid Map</button>
+                        <button class="hw-tab" onclick="hwSwitchLiveTab('split', this)">🔲 Camera + BEV Split</button>
+                        <button class="hw-tab" onclick="hwSwitchLiveTab('telemetry', this)">📊 Full Telemetry</button>
+                    </div>
+
+                    <!-- Camera Feed Tab -->
+                    <div id="hw-tab-camera" class="hw-live-tab-content">
+                        <div class="hw-live-panel">
+                            <div class="hw-live-panel-header">
+                                <span class="hw-live-panel-title">📹 Real-Time Video Feed — Live from Rover Camera</span>
+                                <span style="font-size:0.72rem; color: var(--accent-green); font-family: var(--font-mono);">● STREAMING</span>
+                            </div>
+                            <div class="hw-live-panel-body">
+                                <img id="hw-camera-feed" src="" alt="Waiting for camera feed..." style="background:#000000;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BEV Grid Tab -->
+                    <div id="hw-tab-bev" class="hw-live-tab-content hw-section-hidden">
+                        <div class="hw-live-panel">
+                            <div class="hw-live-panel-header">
+                                <span class="hw-live-panel-title">🗺️ Bird's Eye View (BEV) — Concentric Ring Occupancy Grid</span>
+                                <span style="font-size:0.72rem; color: var(--accent-amber); font-family: var(--font-mono);">● QWEN3-VL / LIDAR GRID</span>
+                            </div>
+                            <div class="hw-live-panel-body">
+                                <canvas id="hw-bev-canvas" width="500" height="500" style="width:100%; height:270px; border-radius:8px; background:#040405;"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Split View Tab -->
+                    <div id="hw-tab-split" class="hw-live-tab-content hw-section-hidden">
+                        <div class="hw-live-dash">
+                            <div class="hw-live-panel">
+                                <div class="hw-live-panel-header">
+                                    <span class="hw-live-panel-title">📹 Camera Feed</span>
+                                    <span style="font-size:0.72rem; color: var(--accent-green); font-family: var(--font-mono);">● LIVE</span>
+                                </div>
+                                <div class="hw-live-panel-body">
+                                    <img id="hw-camera-feed-split" src="" alt="Camera" style="background:#000000;">
+                                </div>
+                            </div>
+                            <div class="hw-live-panel">
+                                <div class="hw-live-panel-header">
+                                    <span class="hw-live-panel-title">🗺️ BEV Spatial Map</span>
+                                    <span style="font-size:0.72rem; color: var(--accent-amber); font-family: var(--font-mono);">● LIVE</span>
+                                </div>
+                                <div class="hw-live-panel-body">
+                                    <canvas id="hw-bev-canvas-split" width="500" height="500" style="width:100%; height:270px; border-radius:8px; background:#040405;"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Full Telemetry Tab -->
+                    <div id="hw-tab-telemetry" class="hw-live-tab-content hw-section-hidden">
+                        <div class="hw-metrics-grid" style="grid-template-columns: repeat(3, 1fr);">
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Connected Board</div>
+                                <div class="hw-metric-value" id="hw-t-hardware" style="font-size: 1rem; color: var(--accent-amber);">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Port / Endpoint</div>
+                                <div class="hw-metric-value" id="hw-t-port" style="font-size: 1rem; color: #ffffff;">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Link Status</div>
+                                <div class="hw-metric-value" id="hw-t-connected" style="font-size: 1rem; color: var(--accent-green);">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Pose X (m)</div>
+                                <div class="hw-metric-value" id="hw-t-pose-x">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Pose Y (m)</div>
+                                <div class="hw-metric-value" id="hw-t-pose-y">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Heading Yaw (°)</div>
+                                <div class="hw-metric-value" id="hw-t-yaw">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Near Ring Cells (0-10m)</div>
+                                <div class="hw-metric-value" id="hw-t-ring0" style="color: var(--accent-amber);">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Mid Ring Cells (10-30m)</div>
+                                <div class="hw-metric-value" id="hw-t-ring1" style="color: var(--accent-purple, #a855f7);">—</div>
+                            </div>
+                            <div class="hw-metric-card">
+                                <div class="hw-metric-label">Far Ring Cells (30-100m)</div>
+                                <div class="hw-metric-value" id="hw-t-ring2" style="color: var(--accent-orange, #d97706);">—</div>
+                            </div>
+                        </div>
+
+                        <!-- Qwen3-VL Autopilot Status inside telemetry -->
+                        <div class="hw-connect-panel" style="border-color: rgba(245, 158, 11, 0.25);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                                <span style="font-size:0.88rem; font-weight:700; color:#ffffff; display:flex; align-items:center; gap:8px;">
+                                    <span>🧠</span> Qwen3-VL Vision-Based Spatial Autopilot
+                                </span>
+                                <span id="hw-t-autopilot-badge" style="font-size:0.72rem; padding:3px 10px; border-radius:6px; background:rgba(148,163,184,0.15); color:#94a3b8; font-weight:700; font-family:var(--font-mono);">STANDBY</span>
+                            </div>
+                            <div id="hw-t-thought" style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); background:rgba(0,0,0,0.4); padding:10px 14px; border-radius:8px; min-height:36px; border:1px solid rgba(255,255,255,0.06);">Waiting for Qwen3-VL neural perception telemetry...</div>
+                        </div>
+                    </div>
+
+                    <!-- Teleop Controls -->
+                    <div class="hw-connect-panel" style="margin-top: 12px; text-align: center;">
+                        <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.08em;">Direct Teleoperation Drive Controls (WASD / Keyboard Arrows)</div>
+                        <div style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;">
+                            <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('forward')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('forward')" ontouchend="hwTeleop('stop')">▲ W</button>
+                            <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('left')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('left')" ontouchend="hwTeleop('stop')">◀ A</button>
+                            <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('backward')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('backward')" ontouchend="hwTeleop('stop')">▼ S</button>
+                            <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('right')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('right')" ontouchend="hwTeleop('stop')">▶ D</button>
+                            <button class="hw-teleop-btn hw-teleop-stop" style="min-width: 90px;" onclick="hwTeleop('stop')">■ STOP</button>
+                        </div>
+                    </div>
+
+                    <!-- Step 3 Bottom Action Controls -->
+                    <div class="hw-step-bottom-bar" style="margin-top: 20px;">
+                        <button class="hw-btn-secondary" onclick="hwGoToStep(1)">🔄 Switch Hardware Platform</button>
+                        <button class="hw-btn-secondary" onclick="hwGoToStep(2)">📖 Review Wiring & Pinout Guide</button>
+                        <button class="hw-btn-primary" onclick="showPageView('dashboard')">🚀 Open Full Teleop HUD Cockpit →</button>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+    </div>
+
     <!-- PAGE VIEW 2: Full Teleoperation Dashboard HUD -->
     <div id="dashboard-view" class="page-view">
         
@@ -315,6 +1410,26 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <span class="btn-text">Dual-Sensor Split</span>
                     <div class="btn-hover-content">
                         <span>Dual-Sensor Split</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+
+                <!-- Qwen3-VL Auto-Pilot Toggle Button -->
+                <button class="interactive-hover-btn view-btn" id="btn-autopilot-qwen" onclick="toggleQwenAutoPilot()" style="border-color: rgba(56, 189, 248, 0.5); background: rgba(56, 189, 248, 0.08);">
+                    <span class="btn-text" id="autopilot-btn-text">🤖 Auto-Pilot: OFF</span>
+                    <div class="btn-hover-content">
+                        <span id="autopilot-hover-text">Toggle Auto-Pilot</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                    </div>
+                    <div class="btn-bg-expand"></div>
+                </button>
+
+                <!-- Hardware Connect Wizard Shortcut -->
+                <button class="interactive-hover-btn view-btn" id="btn-dashboard-hardware" onclick="showPageView('hardware')" style="border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08);">
+                    <span class="btn-text">🔌 Connect Hardware</span>
+                    <div class="btn-hover-content">
+                        <span>Connect Hardware</span>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
                     </div>
                     <div class="btn-bg-expand"></div>
@@ -446,6 +1561,35 @@ void process_scan(const FoveatedPointBuffer& scan) {
                         <div class="metric-label">SoC Temp (°C)</div>
                         <div class="metric-val" id="stat-soc-temp" style="color: var(--accent-purple);">— °C</div>
                         <div class="metric-sub" id="stat-temp-sub">Awaiting telemetry...</div>
+                    </div>
+                </div>
+
+                <!-- Qwen3-VL Vision Navigator (Pure Visual Autonomous Agent) -->
+                <div class="panel-title" style="margin-top: 8px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                    Qwen3-VL Vision Navigator
+                </div>
+                <div class="metric-card" style="padding: 10px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; margin-bottom: 8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <span style="font-size:10.5px; font-weight:700; color:#38bdf8; font-family:'JetBrains Mono', monospace;">🧠 QWEN3-VL: DEEPER THOUGHT</span>
+                        <span id="qwen-autopilot-badge" style="font-size:10px; padding:2px 7px; border-radius:4px; background:rgba(148,163,184,0.15); color:#94a3b8; font-weight:700; letter-spacing:0.5px;">STANDBY</span>
+                    </div>
+                    <div id="qwen-thought-stream" style="font-size:11px; color:#f1f5f9; font-family:'JetBrains Mono', monospace; line-height:1.4; max-height:75px; overflow-y:auto; padding:4px 6px; background:rgba(0,0,0,0.3); border-radius:4px;">
+                        Sharper Vision: Analyzing live scene horizon (Zero-LiDAR Mode)...
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-top: 8px; text-align: center;">
+                        <div style="background:rgba(255,255,255,0.04); padding:4px; border-radius:4px; border:1px solid rgba(255,255,255,0.05);">
+                            <span style="font-size:9px; color:#94a3b8; display:block;">LEFT CLEAR</span>
+                            <span id="qwen-dist-left" style="font-size:11px; font-weight:700; color:#38bdf8;">2.4 m</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.04); padding:4px; border-radius:4px; border:1px solid rgba(255,255,255,0.05);">
+                            <span style="font-size:9px; color:#94a3b8; display:block;">CENTER CLEAR</span>
+                            <span id="qwen-dist-center" style="font-size:11px; font-weight:700; color:#4ade80;">3.8 m</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.04); padding:4px; border-radius:4px; border:1px solid rgba(255,255,255,0.05);">
+                            <span style="font-size:9px; color:#94a3b8; display:block;">RIGHT CLEAR</span>
+                            <span id="qwen-dist-right" style="font-size:11px; font-weight:700; color:#38bdf8;">2.6 m</span>
+                        </div>
                     </div>
                 </div>
 
@@ -583,5 +1727,6 @@ void process_scan(const FoveatedPointBuffer& scan) {
     <script src="three.min.js"></script>
     <script src="three_simulator.js?v=22"></script>
     <script src="teleop_dashboard.js?v=22"></script>
+    <script src="hardware_connect.js?v=1"></script>
 </body>
 </html>

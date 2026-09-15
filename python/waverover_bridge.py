@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlparse
 # Optional dependencies with graceful fallbacks
 try:
     import serial
+    import serial.tools.list_ports
 except ImportError:
     serial = None
 
@@ -40,23 +41,33 @@ try:
 except ImportError:
     np = None
 
+try:
+    from qwen_vl_navigator import Qwen3VLNavigator
+except ImportError:
+    try:
+        from python.qwen_vl_navigator import Qwen3VLNavigator
+    except ImportError:
+        Qwen3VLNavigator = None
+
 
 # =============================================================================
-# 1. WAVE ROVER ESP32 SERIAL CONTROLLER
+# 1. WAVE ROVER ESP32 / ARDUINO SERIAL CONTROLLER
 # =============================================================================
 class WaveRoverESP32:
-    """Handles bidirectional communication with the Wave Rover ESP32 controller.
-    Waveshare Protocol: JSON strings terminated with newline (\\n).
+    """Handles bidirectional communication with the Wave Rover microcontroller
+    (Arduino Uno R3/R4, Nano, or onboard ESP32 controller).
+    Waveshare / Arduino Protocol: JSON strings terminated with newline (\\n).
     Commands:
       {"T":1,"L":left_speed,"R":right_speed}  -> Differential drive (-255 to 255)
       {"T":0}                                 -> Emergency stop
       {"T":1001}                              -> Request odometry & battery voltage
     """
-    def __init__(self, port="/dev/ttyS0", baudrate=115200):
+    def __init__(self, port=None, baudrate=115200):
         self.port = port
         self.baudrate = baudrate
         self.ser = None
         self.connected = False
+        self.mcu_type = "Generic MCU"
         self.lock = threading.Lock()
         
         # Telemetry State
@@ -77,19 +88,44 @@ class WaveRoverESP32:
             print("[WAVE_ROVER] pyserial not installed. Running in mock hardware mode.")
             return
 
-        candidate_ports = [self.port, "/dev/ttyUSB0", "/dev/ttyACM0", "/dev/serial0", "COM3"]
+        candidate_ports = []
+        if self.port:
+            candidate_ports.append(self.port)
+
+        # Auto-detect all active system COM ports (Windows) & /dev/tty* (Linux/Mac)
+        try:
+            available_ports = [p.device for p in serial.tools.list_ports.comports()]
+            candidate_ports.extend(available_ports)
+        except Exception:
+            pass
+
+        # Standard fallback paths
+        default_fallbacks = ["COM3", "COM4", "COM5", "COM6", "COM7", "/dev/ttyUSB0", "/dev/ttyACM0", "/dev/ttyS0", "/dev/serial0"]
+        for fb in default_fallbacks:
+            if fb not in candidate_ports:
+                candidate_ports.append(fb)
+
         for p in candidate_ports:
             try:
-                self.ser = serial.Serial(p, self.baudrate, timeout=0.1)
+                self.ser = serial.Serial(p, self.baudrate, timeout=0.2)
+                time.sleep(1.0) # Allow Arduino DTR reset to settle
                 self.port = p
                 self.connected = True
-                print(f"[WAVE_ROVER] Successfully connected to ESP32 on {p} @ {self.baudrate} baud.")
+                
+                # Check for Arduino vs ESP32 identification
+                port_desc = p
+                if "COM" in p.upper():
+                    self.mcu_type = "Arduino Uno / USB Serial"
+                else:
+                    self.mcu_type = "ESP32 / UART"
+
+                print(f"[WAVE_ROVER] Successfully connected to Microcontroller on {p} @ {self.baudrate} baud ({self.mcu_type}).")
                 break
             except Exception:
                 continue
 
         if not self.connected:
-            print("[WAVE_ROVER] Notice: Real ESP32 not detected on serial ports. Running in Simulation Emulation Mode.")
+            print("[WAVE_ROVER] Notice: Real Arduino/ESP32 not detected on serial ports. Running in Simulation Emulation Mode.")
 
     def send_cmd(self, cmd_dict):
         """Send JSON command to ESP32."""
@@ -219,15 +255,16 @@ class FoveatedGridEngine:
 # 3. LIVE CAMERA STREAMER (MJPEG SERVER FOR DASHBOARD)
 # =============================================================================
 class LiveCameraStreamer:
-    """Captures live feed from Raspberry Pi Camera (CSI) or USB webcam,
-    draws optional foveated gaze bounding boxes, and serves via MJPEG.
+    """Captures live feed from camera/webcam, runs Qwen3-VL vision analysis,
+    draws futuristic HUD overlay, and serves via MJPEG.
     """
-    def __init__(self, camera_index=0, width=640, height=480):
+    def __init__(self, camera_index=0, width=640, height=480, qwen_nav=None):
         self.camera_index = camera_index
         self.width = width
         self.height = height
         self.cap = None
         self.latest_frame_jpeg = None
+        self.qwen_nav = qwen_nav
         self.lock = threading.Lock()
         self.running = True
 
@@ -243,7 +280,7 @@ class LiveCameraStreamer:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
             if not self.cap.isOpened():
-                print(f"[CAMERA] Warning: Unable to open /dev/video{self.camera_index}. Using generated test feed.")
+                print(f"[CAMERA] Warning: Unable to open camera index {self.camera_index}. Using synthetic visual feed.")
                 self.cap = None
         except Exception as e:
             print(f"[CAMERA] Error initializing camera: {e}")
@@ -260,15 +297,18 @@ class LiveCameraStreamer:
             if frame is None:
                 # Generate high-contrast synthetic test card if physical camera is offline
                 frame = np.zeros((self.height, self.width, 3), dtype=np.uint8) if np else None
-                if frame is not None:
-                    # Blue grid & text
+                if frame is not None and cv2:
                     frame[:] = (15, 23, 42)
-                    cv2.putText(frame, "WAVE ROVER LIVE CAM FEED", (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (56, 189, 248), 2)
-                    cv2.putText(frame, "STATUS: STREAMING ACTIVE", (40, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (74, 222, 128), 2)
+                    cv2.putText(frame, "QWEN3-VL VISION STREAM", (40, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (56, 189, 248), 2)
+                    cv2.putText(frame, "SHARPER VISION - DEEPER THOUGHT - BROADER ACTION", (40, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (74, 222, 128), 1)
                     cv2.putText(frame, time.strftime("%H:%M:%S UTC"), (40, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (148, 163, 184), 1)
 
+            # Process with Qwen3-VL Vision Navigator
+            if frame is not None and self.qwen_nav:
+                self.qwen_nav.analyze_frame(frame)
+                frame = self.qwen_nav.draw_qwen_overlay(frame)
+
             if frame is not None and cv2:
-                # Encode as JPEG
                 ret, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ret:
                     with self.lock:
@@ -283,6 +323,7 @@ class LiveCameraStreamer:
 rover_esp = None
 grid_engine = None
 cam_streamer = None
+qwen_navigator = None
 
 class StreamHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -334,8 +375,9 @@ class StreamHandler(BaseHTTPRequestHandler):
                 pass
 
             status_payload = {
-                "hardware": "Waveshare WAVE ROVER (ESP32 + Raspberry Pi CPU)",
+                "hardware": f"Waveshare WAVE ROVER ({rover_esp.mcu_type if rover_esp else 'MCU'} + Host CPU)",
                 "connected": rover_esp.connected if rover_esp else False,
+                "port": rover_esp.port if rover_esp else "None",
                 "battery_voltage": round(rover_esp.voltage if rover_esp else 12.0, 2),
                 "battery_pct": int(max(0, min(100, ((rover_esp.voltage if rover_esp else 12.0) - 10.5) / 2.1 * 100))),
                 "cpu_temp_c": cpu_temp,
@@ -369,6 +411,18 @@ class StreamHandler(BaseHTTPRequestHandler):
             grid_summary = grid_engine.process_lidar_scan(synthetic_pts, ego_pose)
             self.wfile.write(json.dumps(grid_summary).encode('utf-8'))
 
+        # 4. Qwen3-VL Auto-Pilot Status API
+        elif parsed.path == '/api/rover/autopilot':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            if qwen_navigator:
+                with qwen_navigator.lock:
+                    self.wfile.write(json.dumps(qwen_navigator.latest_state).encode('utf-8'))
+            else:
+                self.wfile.write(b'{"autopilot_active": false}')
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -376,7 +430,7 @@ class StreamHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
 
-        # 4. Teleoperation Control API (Keyboard / Joystick commands from Browser)
+        # 5. Teleoperation Control API (Keyboard / Joystick commands from Browser)
         if parsed.path == '/api/rover/teleop':
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length).decode('utf-8')
@@ -406,23 +460,59 @@ class StreamHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(str(e).encode('utf-8'))
 
+        # 6. Qwen3-VL Auto-Pilot Toggle API (Enable / Disable from Browser)
+        elif parsed.path == '/api/rover/autopilot':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length).decode('utf-8')
+            try:
+                cmd = json.loads(body)
+                enable = bool(cmd.get("enabled", False))
+                if qwen_navigator:
+                    qwen_navigator.set_autopilot(enable)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "ok", "autopilot_active": enable}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(str(e).encode('utf-8'))
+
 
 # =============================================================================
 # 5. ENTRY POINT & DAEMON LAUNCHER
 # =============================================================================
 def main():
-    global rover_esp, grid_engine, cam_streamer
+    import argparse
+    global rover_esp, grid_engine, cam_streamer, qwen_navigator
+
+    parser = argparse.ArgumentParser(description="Wave Rover Hardware Bridge (Arduino / ESP32 + Host PC / Pi)")
+    parser.add_argument("--port", type=str, default=None, help="Serial port (e.g. COM3, COM4, /dev/ttyUSB0, /dev/ttyS0)")
+    parser.add_argument("--baud", type=int, default=115200, help="Baud rate (default: 115200)")
+    parser.add_argument("--camera", type=int, default=0, help="Camera device index (default: 0)")
+    parser.add_argument("--web-port", type=int, default=8081, help="HTTP MJPEG & REST port (default: 8081)")
+    args = parser.parse_args()
 
     print("=================================================================")
-    print("  🚀 Starting Waveshare WAVE ROVER + Foveated LiDAR Bridge")
-    print("  - Microcontroller : ESP32 (Motors, Encoders, Battery)")
-    print("  - Host Processor  : Raspberry Pi CPU (Pure CPU Foveated Engine)")
+    print("  🚀 Starting Waveshare WAVE ROVER + Qwen3-VL Vision Navigator")
+    print("  - Microcontroller : Arduino Uno Q / ESP32 (Motors, Encoders, Battery)")
+    print("  - Host Perception : Qwen3-VL Vision-Language Agent (Pure Vision / No LiDAR)")
+    print("  - Three Pillars   : Sharper Vision | Deeper Thought | Broader Action")
     print("=================================================================")
 
     # Initialize Hardware Subsystems
-    rover_esp = WaveRoverESP32(port="/dev/ttyS0", baudrate=115200)
+    rover_esp = WaveRoverESP32(port=args.port, baudrate=args.baud)
     grid_engine = FoveatedGridEngine()
-    cam_streamer = LiveCameraStreamer(camera_index=0, width=640, height=480)
+    
+    # Initialize Qwen3-VL Navigator
+    if Qwen3VLNavigator:
+        qwen_navigator = Qwen3VLNavigator(rover_controller=rover_esp)
+        print("[QWEN3-VL] Qwen3-VL Autonomous Vision Navigator initialized.")
+    else:
+        qwen_navigator = None
+
+    cam_streamer = LiveCameraStreamer(camera_index=args.camera, width=640, height=480, qwen_nav=qwen_navigator)
 
     # Start Background Workers
     t_esp = threading.Thread(target=rover_esp.read_telemetry_loop, daemon=True)
@@ -431,12 +521,13 @@ def main():
     t_cam = threading.Thread(target=cam_streamer.start_capture_loop, daemon=True)
     t_cam.start()
 
-    # Start Video & REST Server on Port 8081
-    port = 8081
+    # Start Video & REST Server
+    port = args.web_port
     server = HTTPServer(('0.0.0.0', port), StreamHandler)
     print(f"[BRIDGE] Live Camera MJPEG Stream  -> http://0.0.0.0:{port}/video_feed")
     print(f"[BRIDGE] Rover Telemetry & Status -> http://0.0.0.0:{port}/api/rover/status")
     print(f"[BRIDGE] Teleop Motor Control API -> http://0.0.0.0:{port}/api/rover/teleop")
+    print(f"[BRIDGE] Qwen3-VL Auto-Pilot API   -> http://0.0.0.0:{port}/api/rover/autopilot")
     print("=================================================================")
 
     try:
