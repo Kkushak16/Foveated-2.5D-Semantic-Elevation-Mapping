@@ -163,6 +163,7 @@
 
     // ─── Instructions Renderer ────────────────────────────────
     function hwRenderInstructions(deviceId) {
+        deviceId = deviceId || hwSelectedDevice || 'arduino-uno-q';
         hwSelectedDevice = deviceId;
         const info = HW_INSTRUCTIONS[deviceId];
         const container = document.getElementById('hw-instructions-content');
@@ -270,6 +271,7 @@
 
     // ─── Direct Auto-Connect to Selected Hardware ──────────────
     async function hwAutoConnectDevice(deviceId) {
+        deviceId = deviceId || hwSelectedDevice || 'arduino-uno-q';
         hwSelectedDevice = deviceId;
         
         // Highlight card
@@ -819,7 +821,15 @@
     window.hwAttemptConnect = hwAttemptConnect;
     window.hwSwitchLiveTab = hwSwitchLiveTab;
     window.hwTeleop = hwTeleop;
-    window.hwSelectedDevice = hwSelectedDevice;
+    try {
+        Object.defineProperty(window, 'hwSelectedDevice', {
+            get() { return hwSelectedDevice; },
+            set(v) { hwSelectedDevice = v; },
+            configurable: true
+        });
+    } catch (e) {
+        window.hwSelectedDevice = hwSelectedDevice;
+    }
 
     // Initial setup on load
     if (document.readyState === 'loading') {

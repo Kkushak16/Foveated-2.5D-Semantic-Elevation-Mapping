@@ -2839,6 +2839,7 @@ function showPageView(viewId) {
 
     if (viewId === 'dashboard') {
         document.body.classList.remove('landing-active');
+        document.body.classList.remove('hardware-active');
         document.getElementById('dashboard-view').classList.add('active');
         if (engineInstance) {
             // Correct method name is resize(), not resizeCanvases()
@@ -2846,13 +2847,22 @@ function showPageView(viewId) {
         }
         // Dashboard view owns the scroll container; reset to top.
         window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+        try { history.replaceState(null, '', '#dashboard'); } catch (e) { /* noop */ }
     } else if (viewId === 'hardware') {
         document.body.classList.remove('landing-active');
+        document.body.classList.add('hardware-active');
         document.getElementById('hardware-view').classList.add('active');
         window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+        try { history.replaceState(null, '', '#hardware'); } catch (e) { /* noop */ }
     } else {
+        document.body.classList.remove('hardware-active');
         document.body.classList.add('landing-active');
         document.getElementById('landing-view').classList.add('active');
+        try {
+            if (window.location.hash === '#dashboard' || window.location.hash === '#hardware') {
+                history.replaceState(null, '', '#');
+            }
+        } catch (e) { /* noop */ }
     }
 }
 
@@ -2860,6 +2870,10 @@ function showPageView(viewId) {
 // while the dashboard view is active (landing is display:none), so every
 // nav/hero link uses data-scroll-to and routes through here.
 function goToSection(sectionId) {
+    if (sectionId === 'hardware') {
+        showPageView('hardware');
+        return;
+    }
     const landing = document.getElementById('landing-view');
     const isDashboard = document.getElementById('dashboard-view').classList.contains('active');
     if (isDashboard || !landing.classList.contains('active')) {
@@ -2879,6 +2893,16 @@ function goToSection(sectionId) {
     // Keep the URL hash in sync without triggering a default jump.
     try { history.replaceState(null, '', '#' + sectionId); } catch (e) { /* noop */ }
 }
+
+// Handle initial hash on page load and hash changes
+window.addEventListener('hashchange', () => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash === 'hardware') {
+        showPageView('hardware');
+    } else if (hash === 'dashboard') {
+        showPageView('dashboard');
+    }
+});
 
 // Expose for inline onclick handlers (script is loaded at end of body,
 // but explicit assignment survives minifiers/bundlers).
@@ -3393,6 +3417,12 @@ window.switchCodeTab = switchCodeTab;
 
     window.addEventListener('DOMContentLoaded', () => {
         detectPlatform();
+        const initialHash = window.location.hash.replace(/^#/, '');
+        if (initialHash === 'hardware') {
+            showPageView('hardware');
+        } else if (initialHash === 'dashboard') {
+            showPageView('dashboard');
+        }
         // Start telemetry polling with a small initial delay
         setTimeout(() => {
             pollTelemetry();

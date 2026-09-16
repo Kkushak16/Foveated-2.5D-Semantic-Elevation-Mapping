@@ -1,7 +1,7 @@
 /*
  * wave_rover_controller.ino — Arduino Firmware for Waveshare WAVE ROVER
  * =====================================================================
- * Target: Arduino Uno (R3/R4), Nano, Mega, or Arduino Uno WiFi / Nano ESP32
+ * Target: Arduino Uno (R3/R4/Q), Nano, Mega, or Arduino Uno WiFi / Nano ESP32
  * 
  * Functions:
  *   1. Receives JSON movement commands over Serial (USB @ 115200 baud):

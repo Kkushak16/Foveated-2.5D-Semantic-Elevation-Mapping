@@ -718,11 +718,13 @@ header {
    21st.dev SaaS Landing Page Template Styling
    ========================================================================== */
 
-body.landing-active {
-    overflow-y: auto;
-    overflow-x: hidden;
-    height: auto;
-    min-height: 100vh;
+body.landing-active,
+body.hardware-active,
+body:has(#hardware-view.active) {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+    min-height: 100vh !important;
 }
 
 .saas-navbar {
@@ -797,6 +799,14 @@ body.landing-active {
 
 .page-view.active {
     display: block;
+}
+
+#hardware-view.active {
+    display: block !important;
+    min-height: 100vh;
+    height: auto;
+    overflow-y: visible;
+    width: 100%;
 }
 
 #dashboard-view {

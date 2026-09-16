@@ -321,27 +321,34 @@ For autonomous rovers, budget prototypes, and hackathons (e.g. Smart India Hacka
 ```
 
 #### Quick Start with Hardware Integration Engine:
-The frontend includes a built-in **Hardware Integration Engine** accessible at `http://localhost:8090` via the **"🔌 Connect Hardware"** button:
+The frontend includes a built-in **Hardware Integration Engine** accessible at `http://localhost:8080#hardware` (or via the top navigation **"🔌 Connect Hardware"** button):
 
 1. **Step 1 · Choose Hardware:**
-   - **Arduino Uno Q (Recommended):** Dual-Core MCU with native USB-C, high-precision PWM motor drive & encoder feedback.
-   - **Raspberry Pi 4 / 5:** High-performance Linux SBC running Python telemetry bridge.
+   - **Arduino Uno Q (Recommended):** High-precision PWM motor drive, dual encoder tracking, and USB-C connectivity.
+   - **Raspberry Pi 4 / 5:** High-performance Linux SBC running the Python telemetry bridge.
    - **Arduino Uno R3 / R4 WiFi:** Classic microcontroller with motor shield.
    - **ESP32 (Wave Rover Onboard):** Factory dual-core MCU connected via Micro-USB or Wi-Fi AP.
    - **Custom Robot:** Any differential drive chassis communicating via 115200 baud JSON serial.
    - **Auto-Detect:** Click `⚡ Scan & Auto-Connect` to probe local ports and launch the session.
 
 2. **Step 2 · Interactive Setup Guide & Pinouts:**
-   - Interactive board switcher tabs to view tailored wiring diagrams and commands.
+   - Interactive board switcher tabs to view tailored wiring diagrams, pin assignments, and firmware commands.
    - Exact pin mapping for motors, encoders, and thermal sensors.
-   - 1-click compile and upload commands using `arduino-cli` / `platformio`.
+   - 1-click compile and upload instructions using `arduino-cli` / `platformio`.
 
 3. **Step 3 · Connect & Live Dashboard:**
-   - **Low-Latency Video Feed:** Streaming with Qwen3-VL neural detection HUD.
+   - **Low-Latency Video Feed:** Streaming camera feed with Qwen3-VL neural detection HUD.
    - **2.5D Concentric Ring BEV:** Near (0–10m), Mid (10–30m), Far (30–100m) occupancy grid.
    - **Live Telemetry:** Stream FPS (~30 FPS), Roundtrip Ping (~2–4 ms), Board/SoC Temperature (°C), Battery Voltage (V).
    - **Direct Drive Teleop:** Interactive on-screen WASD buttons and keyboard arrow keys with emergency stop.
    - **Simulation Mode Fallback:** Automatically active when physical bridge is offline so all UI elements and driving controls can be tested immediately.
+
+#### Hardware Diagnostics & COM Verification Script:
+Before launching the web dashboard, you can verify your USB-connected Arduino or microcontroller using the automated diagnostic tool:
+```bash
+python scripts/test_arduino_board.py
+```
+This script checks `pyserial`, auto-scans active COM/serial ports, tests the 115200 baud handshake with `{"T":1001}`, and verifies telemetry packet reception.
 
 #### Pure-Vision Mapping Without LiDAR (Qwen3-VL):
 Physical LiDAR hardware is **100% optional**. If a LiDAR sensor is not connected, the system engages **Qwen3-VL ("Sharper Vision, Deeper Thought, Broader Action")** to perform monocular spatial depth reasoning, construct the concentric occupancy grid from camera frames, and navigate autonomously along collision-free paths.
@@ -450,6 +457,12 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 ├── cuda/                         # NVIDIA CUDA Acceleration
 │   ├── include/grid_projection.cuh
 │   └── src/grid_projection.cu    # Parallel 3D-to-2.5D projection kernels (<1.8ms)
+├── arduino/                      # Microcontroller Firmware
+│   └── wave_rover_controller/
+│       └── wave_rover_controller.ino # 115200 Baud JSON motor control & encoder telemetry
+├── scripts/                      # Hardware Diagnostics & Setup Scripts
+│   ├── test_arduino_board.py     # Live diagnostic for Arduino Uno Q / COM serial
+│   └── jetson_setup.sh           # Automated JetPack environment configuration
 ├── ros2_ws/                      # ROS 2 Colcon Workspace
 │   └── src/vehicle_detection_ros2/
 │       └── src/foveated_vehicle_detect_node.cpp  # Multi-threaded ROS 2 node
@@ -457,11 +470,13 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 │   ├── semantic_detector.py      # Multi-backend detector (YOLOv8 / OpenCV HOG cascade)
 │   ├── yolo_vision_server.py     # High-speed WebSocket vision server for dashboard
 │   ├── test_semantic_vision.py   # Test suite for static persons, vehicles & wheel parts
+│   ├── waverover_bridge.py       # Serial-to-HTTP/WS rover telemetry bridge
 │   └── camera_foveated_processor.py # 3-ring optical flow & ROI cropping
 └── web/                          # Teleoperation Dashboard UI & Bridges
     ├── server/websocket_bridge.js# Node.js HTTP & telemetry WebSocket bridge
     └── ui/                       # HTML5, CSS3, Three.js 3D Simulator & WebGL HUD
         ├── index.html            # Main dashboard interface
+        ├── hardware_connect.js   # 3-step hardware connection wizard & live dashboard
         ├── three_simulator.js    # 3D WebGL Simulator with suspension & pure pursuit
         ├── teleop_dashboard.js   # Teleoperation canvas renderers & sensor fusion
         └── three.min.js          # Three.js 3D library
