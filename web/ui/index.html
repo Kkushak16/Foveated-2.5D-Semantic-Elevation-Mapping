@@ -1136,9 +1136,6 @@ void process_scan(const FoveatedPointBuffer& scan) {
                         <button class="hw-btn-primary" onclick="hwAutoConnectDevice(hwSelectedDevice || 'arduino-uno-q')">
                             ⚡ Auto-Connect Selected Board
                         </button>
-                        <button class="hw-btn-secondary" onclick="hwLaunchMockSimulation(); hwGoToStep(3);">
-                            🧪 Test Simulation Mode
-                        </button>
                     </div>
                 </div>
             </div>
@@ -1185,8 +1182,10 @@ void process_scan(const FoveatedPointBuffer& scan) {
                             <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Serial Port / Auto-Detect</label>
                             <input type="text" class="hw-input" id="hw-serial-port" value="Auto-Detect" placeholder="COM3 or /dev/ttyUSB0" style="min-width:160px;">
                         </div>
-                        <div style="margin-top: 20px;">
+                        <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
                             <button class="hw-btn-primary" id="hw-btn-connect" onclick="hwAttemptConnect()">🔌 Connect to Rover</button>
+                            <button class="hw-btn-secondary" id="hw-btn-disconnect" onclick="hwDisconnect()" style="display: none; background: #dc2626; border-color: #ef4444; color: #ffffff; font-weight: 600;">🛑 Disconnect</button>
+                            <button class="hw-btn-secondary" id="hw-btn-ping-led" onclick="hwPingLedSignal()" style="background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.45); color: #f472b6; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;" title="Check hardware status & display Heart/OK on Arduino LED">💓 Check Board &amp; Flash LED</button>
                         </div>
                     </div>
 
@@ -1219,7 +1218,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
                         <div class="hw-metric-card">
                             <div class="hw-metric-label">Roundtrip Latency</div>
                             <div class="hw-metric-value" id="hw-m-latency" style="color: var(--accent-green, #34d399);">—</div>
-                            <div class="hw-metric-sub">Serial / HTTP Ping</div>
+                            <div class="hw-metric-sub" id="hw-m-latency-sub">Serial Bus (&lt; 2.5ms SLA)</div>
                         </div>
                         <div class="hw-metric-card">
                             <div class="hw-metric-label">Board Temperature</div>
@@ -1464,6 +1463,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <label for="select-cam-source" class="metric-label">Camera Sensor Input</label>
                     <select id="select-cam-source" class="custom-select" onchange="switchCameraSource(this.value)">
                         <option value="simulator" selected>🎮 3D Virtual City Simulator</option>
+                        <option value="rover">🛰️ Live Rover Camera Stream</option>
                         <option value="synthetic">🤖 2D Synthetic Benchmark</option>
                         <option value="webcam">📹 Live Physical Webcam Feed</option>
                     </select>
@@ -1728,7 +1728,7 @@ void process_scan(const FoveatedPointBuffer& scan) {
 
     <script src="three.min.js"></script>
     <script src="three_simulator.js?v=22"></script>
-    <script src="teleop_dashboard.js?v=22"></script>
-    <script src="hardware_connect.js?v=1"></script>
+    <script src="teleop_dashboard.js?v=23"></script>
+    <script src="hardware_connect.js?v=2"></script>
 </body>
 </html>

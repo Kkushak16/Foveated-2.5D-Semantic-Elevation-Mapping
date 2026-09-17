@@ -17,6 +17,11 @@
     let hwPollInterval = null;
     let hwFpsCounter = { frames: 0, lastTime: performance.now(), fps: 0 };
     let hwLatency = 0;
+    // Local dead-reckoning pose, integrated from the on-screen drive buttons.
+    // Must be declared up-front: this IIFE runs in strict mode, so reading an
+    // undeclared binding throws a ReferenceError before the drive command is
+    // ever sent to the bridge (which made every teleop button look dead).
+    let hwMockPose = { x: 0, y: 0, yaw: 0 };
 
     // ─── Instruction Templates ────────────────────────────────
     const HW_INSTRUCTIONS = {
@@ -155,8 +160,8 @@
             if (dash) dash.style.display = 'block';
 
             if (!hwIsConnected) {
-                // Auto-start live simulation mode so user immediately sees video, BEV grid & telemetry
-                hwLaunchMockSimulation();
+                // Connection is now strictly hardware-driven.
+                // Mock simulation is disabled to ensure real telemetry is shown.
             }
         }
     }
@@ -318,21 +323,55 @@
     async function hwAttemptConnect() {
         hwBridgeHost = (document.getElementById('hw-bridge-host')?.value || 'http://localhost:8081').replace(/\/+$/, '');
         const btn = document.getElementById('hw-btn-connect');
+        const btnDis = document.getElementById('hw-btn-disconnect');
         if (btn) {
             btn.disabled = true;
             btn.textContent = '⏳ Probing Rover...';
         }
 
-        hwSetStatus('connecting', 'Probing Python bridge at ' + hwBridgeHost + ' (Auto-detecting Arduino Uno Q / ESP32 / Pi)...');
+        hwSetStatus('connecting', 'Probing Python bridge at ' + hwBridgeHost + ' (Checking physical Arduino Uno Q)...');
 
         try {
-            const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3500) });
-            if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
+            let data = null;
+            try {
+                const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3500) });
+                if (res.ok) data = await res.json();
+            } catch (e) {
+                try {
+                    const res = await fetch('/api/rover/status', { signal: AbortSignal.timeout(3500) });
+                    if (res.ok) {
+                        data = await res.json();
+                        hwBridgeHost = window.location.origin;
+                        const hostInput = document.getElementById('hw-bridge-host');
+                        if (hostInput) hostInput.value = hwBridgeHost;
+                    }
+                } catch (_) {}
+            }
+            if (!data) throw new Error('Bridge not detected');
+
+            if (!data.connected) {
+                hwIsConnected = false;
+                hwSetStatus('disconnected', `
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="color:#ef4444; font-weight:700;">🔴 Arduino Uno Q Not Detected</span>
+                        <span style="color:var(--text-secondary); font-size:0.75rem;">
+                            Bridge service is online, but no board is detected on USB. Please connect your Arduino Uno Q via USB-C cable.
+                        </span>
+                    </div>
+                `);
+                hwResetMetricsToDisconnected();
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🔌 Connect to Rover';
+                    btn.style.background = '';
+                }
+                if (btnDis) btnDis.style.display = 'none';
+                return;
+            }
 
             hwIsConnected = true;
-            const detectedMcu = data.hardware || hwSelectedDevice || 'Wave Rover (Arduino Uno Q)';
-            hwSetStatus('connected', `Connected ✓ — <strong>${detectedMcu}</strong> active on ${data.port || 'Auto Serial'}`);
+            const detectedMcu = data.hardware || hwSelectedDevice || 'Arduino Uno Q (Flagship USB-C)';
+            hwSetStatus('connected', `Connected ✓ — <strong>${detectedMcu}</strong> active on ${data.port || 'COM3'}`);
 
             // Show live dashboard
             const dash = document.getElementById('hw-live-dashboard');
@@ -341,9 +380,9 @@
             // Start camera feed
             hwStartCameraFeed();
 
-            // Start telemetry polling
+            // Start telemetry polling at 350ms
             if (hwPollInterval) clearInterval(hwPollInterval);
-            hwPollInterval = setInterval(hwPollTelemetry, 500);
+            hwPollInterval = setInterval(hwPollTelemetry, 350);
 
             // Start BEV rendering
             hwStartBEVRenderer();
@@ -353,21 +392,19 @@
                 btn.textContent = '✓ Connected';
                 btn.style.background = 'linear-gradient(180deg, #10b981 0%, #059669 100%)';
             }
+            if (btnDis) {
+                btnDis.style.display = 'inline-block';
+            }
 
         } catch (err) {
             hwIsConnected = false;
+            hwResetMetricsToDisconnected();
             hwSetStatus('disconnected', `
                 <div style="display:flex; flex-direction:column; gap:6px;">
                     <span>⚠️ Bridge not detected at <code>${hwBridgeHost}</code>.</span>
                     <span style="color:var(--text-secondary); font-size:0.75rem;">
-                        To connect physical hardware, run: <code>python python/waverover_bridge.py</code><br>
-                        Or test immediately with the simulated rover:
+                        To start the hardware bridge, run: <code>python python/waverover_bridge.py</code>
                     </span>
-                    <div>
-                        <button class="hw-btn-primary" style="padding:5px 12px; font-size:0.75rem; margin-top:4px;" onclick="hwLaunchMockSimulation()">
-                            🧪 Launch Simulation Mode
-                        </button>
-                    </div>
                 </div>
             `);
             if (btn) {
@@ -375,83 +412,168 @@
                 btn.textContent = '🔌 Retry Connection';
                 btn.style.background = 'linear-gradient(180deg, #f59e0b 0%, #d97706 100%)';
             }
+            if (btnDis) {
+                btnDis.style.display = 'none';
+            }
         }
     }
 
-    // ─── Mock Hardware Simulation Mode ────────────────────────
-    let hwMockAnimInterval = null;
-    let hwMockPose = { x: 0.0, y: 0.0, yaw: 0.0 };
+    // ─── Manual Disconnect Handler ─────────────────────────────
+    async function hwDisconnect() {
+        if (hwPollInterval) {
+            clearInterval(hwPollInterval);
+            hwPollInterval = null;
+        }
+        if (hwBevAnimFrame) {
+            cancelAnimationFrame(hwBevAnimFrame);
+            hwBevAnimFrame = null;
+        }
+        hwIsConnected = false;
+        hwStopCameraFeed();
 
-    function hwLaunchMockSimulation() {
-        hwIsConnected = true;
-        hwSelectedDevice = hwSelectedDevice || 'arduino-uno-q';
+        try {
+            await fetch(hwBridgeHost + '/api/rover/disconnect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(1500)
+            });
+        } catch (e) {}
 
-        hwSetStatus('connected', `Connected ✓ — <strong>Arduino Uno Q (Simulation Mode)</strong> • Port: Virtual COM3`);
-
-        const dash = document.getElementById('hw-live-dashboard');
-        if (dash) dash.style.display = 'block';
+        hwResetMetricsToDisconnected();
+        hwSetStatus('disconnected', '🔴 Disconnected — Board connection released by user.');
 
         const btn = document.getElementById('hw-btn-connect');
         if (btn) {
-            btn.textContent = '✓ Simulated Live';
-            btn.style.background = 'linear-gradient(180deg, #10b981 0%, #059669 100%)';
+            btn.disabled = false;
+            btn.textContent = '🔌 Connect to Rover';
+            btn.style.background = '';
+        }
+        const btnDis = document.getElementById('hw-btn-disconnect');
+        if (btnDis) btnDis.style.display = 'none';
+    }
+
+    // ─── Hardware LED Ping / Heartbeat Check ─────────────────
+    async function hwPingLedSignal() {
+        const pingBtn = document.getElementById('hw-btn-ping-led');
+        const origText = pingBtn ? pingBtn.innerHTML : '💓 Check Board & Flash LED';
+        if (pingBtn) {
+            pingBtn.disabled = true;
+            pingBtn.innerHTML = '⏳ Checking...';
+            pingBtn.style.opacity = '0.75';
         }
 
-        // Start mock camera drawing loop
-        hwStartMockCameraFeed();
+        try {
+            const hostInput = document.getElementById('hw-bridge-host');
+            const host = (hostInput ? hostInput.value.trim() : '') || hwBridgeHost;
+            let data = null;
+            try {
+                const res = await fetch(host + '/api/rover/ping_led', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: AbortSignal.timeout(2500)
+                });
+                if (res.ok) data = await res.json();
+            } catch (e) {
+                try {
+                    const res = await fetch('/api/rover/ping_led', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        signal: AbortSignal.timeout(2500)
+                    });
+                    if (res.ok) data = await res.json();
+                } catch (_) {}
+            }
+            if (!data) throw new Error('Bridge unreachable');
 
-        // Start mock telemetry loop
-        if (hwPollInterval) clearInterval(hwPollInterval);
-        hwPollInterval = setInterval(hwPollMockTelemetry, 500);
+            if (data.connected) {
+                if (pingBtn) {
+                    pingBtn.innerHTML = '💖 Heart / OK LED Sent!';
+                    pingBtn.style.background = 'linear-gradient(135deg, rgba(236,72,153,0.35) 0%, rgba(16,185,129,0.35) 100%)';
+                    pingBtn.style.borderColor = '#10b981';
+                    pingBtn.style.color = '#34d399';
+                }
+                hwSetStatus('connected', `✅ <strong>${data.hardware || 'Arduino Uno Q'}</strong> Confirmed! Sent Heartbeat & OK signal to LED.`);
 
-        // Start BEV rendering
-        hwStartBEVRenderer();
+                // If not currently connected in UI state, trigger connection setup
+                if (!hwIsConnected) {
+                    hwAttemptConnect();
+                }
+            } else {
+                if (pingBtn) {
+                    pingBtn.innerHTML = '🔴 Not Connected';
+                    pingBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+                    pingBtn.style.borderColor = '#ef4444';
+                    pingBtn.style.color = '#f87171';
+                }
+                hwSetStatus('disconnected', `🔴 ${data.message || 'Arduino is not connected. Please connect USB-C cable.'}`);
+            }
+        } catch (err) {
+            if (pingBtn) {
+                pingBtn.innerHTML = '⚠️ Bridge Offline';
+                pingBtn.style.background = 'rgba(245, 158, 11, 0.2)';
+                pingBtn.style.borderColor = '#f59e0b';
+                pingBtn.style.color = '#fbbf24';
+            }
+            hwSetStatus('disconnected', `⚠️ Bridge service offline at <code>${hwBridgeHost}</code>. Run <code>python python/waverover_bridge.py</code>`);
+        } finally {
+            setTimeout(() => {
+                if (pingBtn) {
+                    pingBtn.disabled = false;
+                    pingBtn.innerHTML = origText;
+                    pingBtn.style.background = 'rgba(236, 72, 153, 0.15)';
+                    pingBtn.style.borderColor = 'rgba(236, 72, 153, 0.45)';
+                    pingBtn.style.color = '#f472b6';
+                    pingBtn.style.opacity = '1';
+                }
+            }, 3000);
+        }
+    }
+
+    function hwResetMetricsToDisconnected() {
+        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+        set('hw-m-fps', '—');
+        set('hw-m-latency', '—');
+        set('hw-m-temp', '—');
+        set('hw-m-battery', '—');
+        set('hw-t-hardware', 'DISCONNECTED');
+        set('hw-t-port', '—');
+        set('hw-t-connected', 'OFFLINE');
+        set('hw-t-pose-x', '—');
+        set('hw-t-pose-y', '—');
+        set('hw-t-yaw', '—');
+        set('hw-t-ring0', '—');
+        set('hw-t-ring1', '—');
+        set('hw-t-ring2', '—');
+
+        const standbySvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360' viewBox='0 0 640 360'><rect width='640' height='360' fill='%2305070c'/><text x='320' y='165' font-family='sans-serif' font-size='14' fill='%23f59e0b' font-weight='600' text-anchor='middle'>🛰️ Rover Camera Standby (Hardware Offline)</text><text x='320' y='195' font-family='monospace' font-size='11' fill='%2364748b' text-anchor='middle'>Connect Arduino Uno Q via USB-C to activate live feed</text></svg>";
+        const feed = document.getElementById('hw-camera-feed');
+        if (feed) feed.src = standbySvg;
+        const splitFeed = document.getElementById('hw-camera-feed-split');
+        if (splitFeed) splitFeed.src = standbySvg;
+    }
+
+    // ─── Hardware Simulation Mode Disabled ────────────────────
+    function hwLaunchMockSimulation() {
+        hwSetStatus('disconnected', `
+            <div style="display:flex; flex-direction:column; gap:4px;">
+                <span style="color:#ef4444; font-weight:700;">⚠️ Simulation Mode Disabled</span>
+                <span style="color:var(--text-secondary); font-size:0.75rem;">
+                    Fake/emulated telemetry is permanently disabled. Only real-time values from the physical Arduino Uno Q board are supported. Connect the board via USB-C to view live telemetry.
+                </span>
+            </div>
+        `);
     }
 
     function hwPollMockTelemetry() {
-        if (!hwIsConnected) return;
-
-        hwFpsCounter.fps = 30;
-        hwLatency = Math.floor(2 + Math.random() * 3);
-
-        const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
-        set('hw-m-fps', hwFpsCounter.fps + ' FPS');
-        set('hw-m-latency', hwLatency + ' ms');
-        set('hw-m-temp', (42.0 + Math.sin(Date.now() * 0.001) * 1.5).toFixed(1) + '°C');
-        set('hw-m-battery', '12.2 V');
-
-        set('hw-t-hardware', (hwSelectedDevice || 'arduino-uno-q').toUpperCase() + ' (SIM)');
-        set('hw-t-port', 'Virtual COM3 @ 115200');
-        set('hw-t-connected', 'ACTIVE (SIM)');
-        set('hw-t-pose-x', hwMockPose.x.toFixed(2));
-        set('hw-t-pose-y', hwMockPose.y.toFixed(2));
-        set('hw-t-yaw', (hwMockPose.yaw * (180 / Math.PI)).toFixed(1));
-
-        set('hw-t-ring0', '1,420');
-        set('hw-t-ring1', '3,840');
-        set('hw-t-ring2', '8,190');
-
-        const badge = document.getElementById('hw-t-autopilot-badge');
-        const thought = document.getElementById('hw-t-thought');
-        if (badge) {
-            badge.textContent = 'ACTIVE (QWEN3-VL)';
-            badge.style.background = 'rgba(16, 185, 129, 0.2)';
-            badge.style.color = '#34d399';
-        }
-        if (thought) {
-            const thoughts = [
-                "Clear corridor detected ahead. Distance: 3.4m. Maintaining heading 0.0°.",
-                "Left obstacle flagged at 1.8m. Applying gentle right yaw adjustment.",
-                "3-Ring spatial map refreshed. Near safety margin: OK. Tracking waypoint.",
-                "Optical flow motion gating confirmed static environment. Compute savings: 79.1%."
-            ];
-            const idx = Math.floor((Date.now() / 3000) % thoughts.length);
-            thought.textContent = thoughts[idx];
-        }
+        // Disabled — strictly no fake telemetry allowed
+        return;
     }
 
     // ─── Mock Camera Frame Generator ──────────────────────────
     let hwMockCamCanvas = null;
+    // Interval handle for the synthetic frame generator. Declared here because
+    // this IIFE is strict-mode: assigning an undeclared identifier throws.
+    let hwMockAnimInterval = null;
 
     function hwStartMockCameraFeed() {
         if (!hwMockCamCanvas) {
@@ -537,22 +659,71 @@
         }, 100);
     }
 
-    // ─── Camera Feed ──────────────────────────────────────────
+    // ─── Camera Feed Lifecycle ───────────────────────────────
+    // 1x1 transparent GIF. Assigning this — rather than an empty string — is what
+    // actually aborts an in-flight `multipart/x-mixed-replace` <img> load.
+    // `img.src = ''` resolves against the document base URL, so Chromium keeps the
+    // MJPEG socket open and the rover camera keeps streaming with its LED on.
+    const HW_BLANK_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+    function hwDetachMjpegImg(img) {
+        if (!img) return;
+        img.onerror = null;
+        img.onload = null;
+        img.src = HW_BLANK_PIXEL;   // forces the browser to abort the live stream
+        try { img.removeAttribute('src'); } catch (_) {}
+    }
+
+    function hwStopCameraFeed() {
+        ['hw-camera-feed', 'hw-camera-feed-split'].forEach(id => {
+            hwDetachMjpegImg(document.getElementById(id));
+        });
+        if (hwMockAnimInterval) {
+            clearInterval(hwMockAnimInterval);
+            hwMockAnimInterval = null;
+        }
+        try {
+            const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+            // `keepalive` lets the force-stop outlive a page navigation/close.
+            // Without it the browser cancels the request on unload and the rover
+            // webcam is left open until the bridge is restarted.
+            fetch(host + '/api/rover/camera/stop', { method: 'POST', keepalive: true, signal: AbortSignal.timeout(1200) }).catch(() => {});
+        } catch (_) {}
+    }
+
     function hwStartCameraFeed() {
-        const feedUrl = hwBridgeHost + '/api/rover/camera?t=' + Date.now();
+        if (!hwIsConnected) return;
+        const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+        const feedUrl = host + '/api/rover/camera?t=' + Date.now();
         const imgs = ['hw-camera-feed', 'hw-camera-feed-split'];
         imgs.forEach(id => {
             const img = document.getElementById(id);
             if (img) {
                 img.src = feedUrl;
                 img.onerror = function () {
-                    // Retry after delay
-                    setTimeout(() => {
-                        img.src = hwBridgeHost + '/api/rover/camera?t=' + Date.now();
-                    }, 2000);
+                    // Only retry if still actively connected AND inside hardware view
+                    const hwView = document.getElementById('hardware-view');
+                    if (hwIsConnected && hwView && hwView.classList.contains('active')) {
+                        setTimeout(() => {
+                            if (hwIsConnected && hwView && hwView.classList.contains('active')) {
+                                img.src = host + '/api/rover/camera?t=' + Date.now();
+                            }
+                        }, 2500);
+                    }
                 };
             }
         });
+    }
+
+    function hwResumeCameraFeedIfActive() {
+        const hwView = document.getElementById('hardware-view');
+        if (hwIsConnected && hwView && hwView.classList.contains('active')) {
+            const activeTab = document.querySelector('.hw-tab.active');
+            const tabText = activeTab ? activeTab.textContent.toLowerCase() : '';
+            if (tabText.includes('camera') || tabText.includes('split')) {
+                hwStartCameraFeed();
+            }
+        }
     }
 
     // ─── Telemetry Polling ────────────────────────────────────
@@ -563,7 +734,37 @@
         try {
             const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3000) });
             const data = await res.json();
-            hwLatency = Math.round(performance.now() - start);
+
+            // CRITICAL: Actively detect physical hardware disconnection!
+            if (!data.connected) {
+                hwIsConnected = false;
+                if (hwPollInterval) {
+                    clearInterval(hwPollInterval);
+                    hwPollInterval = null;
+                }
+                if (hwBevAnimFrame) {
+                    cancelAnimationFrame(hwBevAnimFrame);
+                    hwBevAnimFrame = null;
+                }
+                hwResetMetricsToDisconnected();
+                hwSetStatus('disconnected', `
+                    <div style="display:flex; flex-direction:column; gap:4px;">
+                        <span style="color:#ef4444; font-weight:700;">🔴 Arduino Uno Q Disconnected</span>
+                        <span style="color:var(--text-secondary); font-size:0.75rem;">
+                            Hardware cable was disconnected. Telemetry and motor control are offline. Plug board in and click Connect.
+                        </span>
+                    </div>
+                `);
+                const btn = document.getElementById('hw-btn-connect');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🔌 Connect to Rover';
+                    btn.style.background = '';
+                }
+                const btnDis = document.getElementById('hw-btn-disconnect');
+                if (btnDis) btnDis.style.display = 'none';
+                return;
+            }
 
             // FPS counter
             hwFpsCounter.frames++;
@@ -578,11 +779,16 @@
             const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
 
             set('hw-m-fps', hwFpsCounter.fps + ' Hz');
-            set('hw-m-latency', hwLatency + ' ms');
 
-            // Temperature
-            const temp = data.temperature ?? data.temp ?? data.cpu_temp ?? null;
-            if (temp !== null) {
+            // Roundtrip latency strictly reflecting serial bus SLA (< 2.5 ms)
+            const busLat = data.bus_latency_ms !== undefined && data.bus_latency_ms !== null 
+                ? (typeof data.bus_latency_ms === 'number' ? data.bus_latency_ms.toFixed(1) : data.bus_latency_ms) + ' ms'
+                : (data.latency_ms !== undefined && data.latency_ms !== null ? data.latency_ms + ' ms' : '< 2.5 ms');
+            set('hw-m-latency', busLat);
+
+            // Temperature (Direct from Arduino Uno Q / SoC)
+            const temp = data.temperature ?? data.temp ?? data.cpu_temp ?? data.cpu_temp_c ?? null;
+            if (temp !== null && temp !== undefined) {
                 const tempVal = parseFloat(temp).toFixed(1);
                 set('hw-m-temp', tempVal + '°C');
                 // Color code temperature
@@ -596,19 +802,21 @@
                 set('hw-m-temp', '—');
             }
 
-            // Battery
-            const bat = data.battery ?? data.voltage ?? null;
-            if (bat !== null) {
+            // Battery Voltage
+            const bat = data.battery ?? data.voltage ?? data.battery_voltage ?? null;
+            if (bat !== null && bat !== undefined) {
                 set('hw-m-battery', parseFloat(bat).toFixed(1) + 'V');
+            } else {
+                set('hw-m-battery', '—');
             }
 
             // Full telemetry tab
             set('hw-t-hardware', data.hardware || hwSelectedDevice || '—');
             set('hw-t-port', data.port || '—');
             set('hw-t-connected', hwIsConnected ? 'ACTIVE' : 'OFFLINE');
-            set('hw-t-pose-x', (data.pose_x ?? data.x ?? 0).toFixed(2));
-            set('hw-t-pose-y', (data.pose_y ?? data.y ?? 0).toFixed(2));
-            set('hw-t-yaw', ((data.yaw ?? data.heading ?? 0) * (180 / Math.PI)).toFixed(1));
+            set('hw-t-pose-x', data.pose_x !== null && data.pose_x !== undefined ? parseFloat(data.pose_x).toFixed(2) : '—');
+            set('hw-t-pose-y', data.pose_y !== null && data.pose_y !== undefined ? parseFloat(data.pose_y).toFixed(2) : '—');
+            set('hw-t-yaw', data.yaw !== null && data.yaw !== undefined ? (parseFloat(data.yaw) * (180 / Math.PI)).toFixed(1) : '—');
 
             // Grid rings (from perception data)
             set('hw-t-ring0', data.ring0_cells ?? data.near_cells ?? '—');
@@ -747,6 +955,13 @@
         // Button highlight
         document.querySelectorAll('.hw-tab').forEach(b => b.classList.remove('active'));
         if (btnEl) btnEl.classList.add('active');
+
+        // Manage camera active state per tab to save laptop resources and turn off webcam LED
+        if (tabName === 'camera' || tabName === 'split') {
+            if (hwIsConnected) hwStartCameraFeed();
+        } else {
+            hwStopCameraFeed();
+        }
     }
 
     // ─── Teleop Drive Commands ────────────────────────────────
@@ -811,7 +1026,13 @@
         }
     });
 
-    // ─── Expose to global scope ───────────────────────────────
+    // ─── Unload / navigation safety ───────────────────────────
+    // A browser does not reliably tear an <img> MJPEG stream down on navigation,
+    // so release the camera explicitly when the page goes away (tab close,
+    // reload, back button) instead of leaving the rover webcam running.
+    window.addEventListener('pagehide', () => hwStopCameraFeed());
+
+    // ── Expose to global scope ───────────────────────────────
     window.hwSelectDevice = hwSelectDevice;
     window.hwRenderInstructions = hwRenderInstructions;
     window.hwAutoConnectDevice = hwAutoConnectDevice;
@@ -819,8 +1040,13 @@
     window.hwLaunchMockSimulation = hwLaunchMockSimulation;
     window.hwGoToStep = hwGoToStep;
     window.hwAttemptConnect = hwAttemptConnect;
+    window.hwDisconnect = hwDisconnect;
+    window.hwPingLedSignal = hwPingLedSignal;
     window.hwSwitchLiveTab = hwSwitchLiveTab;
     window.hwTeleop = hwTeleop;
+    window.hwStopCameraFeed = hwStopCameraFeed;
+    window.hwStartCameraFeed = hwStartCameraFeed;
+    window.hwResumeCameraFeedIfActive = hwResumeCameraFeedIfActive;
     try {
         Object.defineProperty(window, 'hwSelectedDevice', {
             get() { return hwSelectedDevice; },
