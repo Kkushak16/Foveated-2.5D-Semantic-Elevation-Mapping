@@ -889,19 +889,92 @@ class UnifiedTeleopEngine {
         this.cameraTargets = [];
     }
 
+    stopAllCameras() {
+        this.disableWebcam();
+        this.releaseRoverCameraStream();
+        try {
+            // `keepalive` lets the force-stop outlive a page navigation/close,
+            // otherwise the browser cancels it on unload and the rover webcam
+            // stays open until the bridge is restarted.
+            fetch('/api/rover/camera/stop', { method: 'POST', keepalive: true, signal: AbortSignal.timeout(1000) }).catch(() => {});
+        } catch (_) {}
+    }
+
+    /**
+     * Tears down the live MJPEG <img> and marks it released so the 60 FPS render
+     * loop does not immediately re-subscribe to the stream.
+     *
+     * Assigning a 1x1 transparent GIF — rather than an empty string — is what
+     * actually closes the `multipart/x-mixed-replace` socket: `img.src = ''` is
+     * resolved against the document base URL, so Chromium leaves the response
+     * open and the rover camera keeps running after the view is switched away.
+     */
+    releaseRoverCameraStream() {
+        // Flag consulted by drawCameraFoveation(): without it, a null
+        // `roverCamImg` is treated as "not connected yet" and recreated on the
+        // very next animation frame, so the stream could never be stopped.
+        this.roverReleased = true;
+
+        const img = this.roverCamImg;
+        this.roverCamImg = null;
+        if (!img) return;
+
+        img.onload = null;
+        img.onerror = null;
+        img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+        try { img.removeAttribute('src'); } catch (_) {}
+    }
+
+    attachRoverCameraStream() {
+        this.roverReleased = false;
+        if (!this.roverCamImg) {
+            this.roverCamImg = new Image();
+            this.roverCamImg.crossOrigin = 'anonymous';
+        }
+        this.roverCamImg.src = '/api/rover/camera?t=' + Date.now();
+    }
+
     setCameraSource(source) {
         this.cameraSource = source;
+        const statusEl = document.getElementById('camera-status-msg');
         if (source === 'webcam') {
             this.enableWebcam();
         } else {
             this.disableWebcam();
         }
-        // When user chooses 2D synthetic benchmark, automatically switch to Camera Foveation view
-        if (source === 'synthetic' && this.viewMode === 'sim3d') {
-            this.setViewMode('camera');
-            document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
-            const camBtn = document.getElementById('btn-view-cam');
-            if (camBtn) camBtn.classList.add('active');
+        if (source === 'rover') {
+            if (statusEl) {
+                statusEl.innerText = '● Rover Stream (/api/rover/camera)';
+                statusEl.style.color = '#38bdf8';
+            }
+            this.attachRoverCameraStream();
+            if (this.viewMode === 'sim3d') {
+                this.setViewMode('camera');
+                document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+                const camBtn = document.getElementById('btn-view-cam');
+                if (camBtn) camBtn.classList.add('active');
+            }
+        } else {
+            this.releaseRoverCameraStream();
+            try {
+                fetch('/api/rover/camera/stop', { method: 'POST', signal: AbortSignal.timeout(1000) }).catch(() => {});
+            } catch (_) {}
+
+            if (source === 'synthetic' && this.viewMode === 'sim3d') {
+                if (statusEl) {
+                    statusEl.innerText = '● Source: 2D Synthetic Benchmark';
+                    statusEl.style.color = '#94a3b8';
+                }
+                this.setViewMode('camera');
+                document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+                const camBtn = document.getElementById('btn-view-cam');
+                if (camBtn) camBtn.classList.add('active');
+            } else if (source === 'simulator') {
+                if (statusEl) {
+                    statusEl.innerText = '● Source: 3D Simulator';
+                    statusEl.style.color = '#94a3b8';
+                }
+            }
         }
     }
 
@@ -989,6 +1062,29 @@ class UnifiedTeleopEngine {
             if (driveHud) driveHud.style.display = 'none';
         }
         this.resize();
+        this.syncCaptureToViewMode();
+    }
+
+    /**
+     * Keeps live capture in lock-step with what is actually on screen. Switching
+     * to a view without the camera canvas (BEV / 3D sim) releases both the webcam
+     * and the rover MJPEG stream so the camera stops and its LED turns off;
+     * switching back re-attaches whichever source is currently selected.
+     */
+    syncCaptureToViewMode() {
+        const showsCamera = this.viewMode === 'camera' || this.viewMode === 'dual';
+
+        if (!showsCamera) {
+            // nothing renders the camera feed -> release the hardware
+            this.stopAllCameras();
+            return;
+        }
+
+        if (this.cameraSource === 'rover' && !this.roverCamImg) {
+            this.attachRoverCameraStream();
+        } else if (this.cameraSource === 'webcam' && !this.webcamActive) {
+            this.enableWebcam();
+        }
     }
 
     setPointDensity(val) {
@@ -1751,6 +1847,31 @@ class UnifiedTeleopEngine {
             const windCanvas = window.threeSim.renderWindshield();
             ctx.drawImage(windCanvas, 0, 0, w, h);
             sourceElem = this.camCanvas;
+        } else if (this.cameraSource === 'rover') {
+            // LIVE ROVER CAMERA STREAM (Wave Rover ESP32 / Arduino Uno Q Bridge)
+            // `roverReleased` is set by releaseRoverCameraStream() so an explicit
+            // stop is not undone by this per-frame "reconnect if missing" logic.
+            if (!this.roverCamImg && !this.roverReleased) {
+                // Relative URL (not the old hardcoded http://localhost:8081) so
+                // the request follows the page origin and its /api proxy, which
+                // is what makes this work for any bridge endpoint.
+                this.attachRoverCameraStream();
+            }
+            if (this.roverCamImg && this.roverCamImg.complete && this.roverCamImg.naturalWidth > 0) {
+                ctx.drawImage(this.roverCamImg, 0, 0, w, h);
+                sourceElem = this.camCanvas;
+            } else {
+                ctx.fillStyle = '#05070c';
+                ctx.fillRect(0, 0, w, h);
+                ctx.fillStyle = '#f59e0b';
+                ctx.font = '14px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('🛰️ Connecting to Rover Video Stream...', w / 2, h / 2 - 10);
+                ctx.font = '11px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#94a3b8';
+                ctx.fillText('/api/rover/camera', w / 2, h / 2 + 15);
+                sourceElem = this.camCanvas;
+            }
         } else if (this.cameraSource === 'webcam' && this.webcamActive && this.videoElem.readyState >= 2) {
             // LIVE PHYSICAL WEBCAM STREAM
             sourceElem = this.videoElem;
@@ -1767,12 +1888,13 @@ class UnifiedTeleopEngine {
         // A generic webcam has no reliable horizon or vehicle hood, so do not label
         // its geometric compute exclusions as semantic sky/hood classifications.
         const isWebcam = this.cameraSource === 'webcam' && this.webcamActive;
+        const isRover = this.cameraSource === 'rover';
         const topLabel = this.cameraSource === 'simulator'
             ? '🚫 SKY REGION MASKED (35% Pixel Savings • Dynamic 3D Dome)'
-            : (isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)' : '🚫 SKY REGION MASKED (35% Pixel Savings • 2D Synthetic Benchmark)');
+            : (isRover ? '🚫 SKY REGION MASKED (35% Pixel Savings • Rover Stream)' : (isWebcam ? '🚫 TOP EXCLUSION ZONE (35% Pixel Savings)' : '🚫 SKY REGION MASKED (35% Pixel Savings • 2D Synthetic Benchmark)'));
         const bottomLabel = this.cameraSource === 'simulator'
             ? '🚫 HOOD REGION MASKED (15% Pixel Savings • Vehicle Geometry)'
-            : (isWebcam ? '🚫 BOTTOM EXCLUSION ZONE (15% Pixel Savings)' : '🚫 HOOD REGION MASKED (15% Pixel Savings • Road Heuristic)');
+            : (isRover ? '🚫 ROVER CHASSIS MASKED (15% Pixel Savings • Bumper Geometry)' : (isWebcam ? '🚫 BOTTOM EXCLUSION ZONE (15% Pixel Savings)' : '🚫 HOOD REGION MASKED (15% Pixel Savings • Road Heuristic)'));
         // Subtle, translucent high-tech foveation masks — darkened for visibility
         ctx.save();
         // Top 35% Sky Mask (Darkened translucent with hatching)
@@ -2821,6 +2943,10 @@ let heroAnimationId = null;
 
 window.addEventListener('DOMContentLoaded', () => {
     engineInstance = new UnifiedTeleopEngine();
+    // showPageView() and the pagehide handler below both live outside this
+    // binding's reach — a bare top-level `let` is only script-scoped, so it must
+    // be published on `window` for them to be able to stop the dashboard camera.
+    window.engineInstance = engineInstance;
     initHeroPreviewCanvas();
 
     // Wire all [data-scroll-to] anchors (nav + hero buttons). Works from both
@@ -2836,6 +2962,15 @@ window.addEventListener('DOMContentLoaded', () => {
 
 function showPageView(viewId) {
     document.querySelectorAll('.page-view').forEach(view => view.classList.remove('active'));
+
+    // If leaving hardware view, immediately stop hardware camera stream
+    if (viewId !== 'hardware' && typeof window.hwStopCameraFeed === 'function') {
+        window.hwStopCameraFeed();
+    }
+    // If leaving dashboard view, immediately stop any dashboard camera stream
+    if (viewId !== 'dashboard' && window.engineInstance && typeof window.engineInstance.stopAllCameras === 'function') {
+        window.engineInstance.stopAllCameras();
+    }
 
     if (viewId === 'dashboard') {
         document.body.classList.remove('landing-active');
@@ -2854,6 +2989,9 @@ function showPageView(viewId) {
         document.getElementById('hardware-view').classList.add('active');
         window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
         try { history.replaceState(null, '', '#hardware'); } catch (e) { /* noop */ }
+        if (typeof window.hwResumeCameraFeedIfActive === 'function') {
+            window.hwResumeCameraFeedIfActive();
+        }
     } else {
         document.body.classList.remove('hardware-active');
         document.body.classList.add('landing-active');
@@ -2908,6 +3046,19 @@ window.addEventListener('hashchange', () => {
 // but explicit assignment survives minifiers/bundlers).
 window.showPageView = showPageView;
 window.goToSection = goToSection;
+
+// A browser does not reliably tear down a live webcam track or an in-flight
+// MJPEG <img> stream on navigation, so release every capture device when the
+// page goes away (tab close, reload, back/forward) instead of leaving the
+// camera running in the background.
+window.addEventListener('pagehide', () => {
+    if (window.engineInstance && typeof window.engineInstance.stopAllCameras === 'function') {
+        window.engineInstance.stopAllCameras();
+    }
+    if (typeof window.hwStopCameraFeed === 'function') {
+        window.hwStopCameraFeed();
+    }
+});
 
 const codeSnippets = {
     cpp: `// Modern C++20 Struct-of-Arrays (SoA) Zero-Allocation Point Buffer
