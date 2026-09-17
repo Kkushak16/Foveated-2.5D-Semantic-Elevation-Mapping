@@ -39,14 +39,14 @@
             this.width = this.canvas.clientWidth || 960;
             this.height = this.canvas.clientHeight || 600;
 
-            // --- High-Resolution WebGL Renderer ---
-            const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+            // --- High-Performance WebGL Renderer (Optimized for locked 60 FPS) ---
+            const dpr = 1.0;
             this.renderer = new THREE.WebGLRenderer({
                 canvas: this.canvas,
-                antialias: true,
+                antialias: false,
                 alpha: false,
                 powerPreference: 'high-performance',
-                preserveDrawingBuffer: true
+                preserveDrawingBuffer: false
             });
             this.renderer.setPixelRatio(dpr);
             this.renderer.setSize(this.width, this.height, true);
@@ -55,8 +55,7 @@
             if (THREE.sRGBEncoding) {
                 this.renderer.outputEncoding = THREE.sRGBEncoding;
             }
-            this.renderer.shadowMap.enabled = true;
-            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.renderer.shadowMap.enabled = false;
 
             // --- Scene & Atmospheric Lighting (Bright Daylight Sky) ---
             this.scene = new THREE.Scene();
@@ -2733,7 +2732,7 @@
         resize(width, height) {
             this.width = width;
             this.height = height;
-            const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
+            const dpr = 1.0;
             this.renderer.setPixelRatio(dpr);
             this.renderer.setSize(width, height, false);
             const aspect = width / height;

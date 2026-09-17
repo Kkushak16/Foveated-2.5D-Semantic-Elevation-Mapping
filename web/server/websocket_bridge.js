@@ -90,6 +90,41 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    // Proxy rover and hardware endpoints to Python Bridge (Port 8081)
+    if (reqUrl.startsWith('/api/rover/') || reqUrl.startsWith('/api/grid/') || reqUrl === '/video_feed') {
+        const proxyReq = http.request({
+            host: '127.0.0.1',
+            port: 8081,
+            path: req.url,
+            method: req.method,
+            headers: {
+                ...req.headers,
+                host: '127.0.0.1:8081'
+            }
+        }, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, {
+                ...proxyRes.headers,
+                'Access-Control-Allow-Origin': '*'
+            });
+            proxyRes.pipe(res, { end: true });
+        });
+        proxyReq.on('error', (err) => {
+            if (!res.headersSent) {
+                res.writeHead(502, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify({ error: true, connected: false, message: 'Bridge offline on 8081' }));
+            }
+        });
+        // Teardown is driven by the downstream response only. Listening on
+        // `req.on('close')` also fires as soon as a bodyless GET has been fully
+        // received, which destroys the upstream socket mid-response and breaks
+        // long-lived MJPEG streams (`/api/rover/camera`, `/video_feed`).
+        res.on('close', () => {
+            proxyReq.destroy();
+        });
+        req.pipe(proxyReq, { end: true });
+        return;
+    }
+
     // -----------------------------------------------------------------------
     // Telemetry API — serves live GPU/system metrics from the Python module
     // (Section 9 of physical-testing.md: frontend telemetry upgrades)

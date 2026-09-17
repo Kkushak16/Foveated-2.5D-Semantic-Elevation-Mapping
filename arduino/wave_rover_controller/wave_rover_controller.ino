@@ -38,6 +38,64 @@ const int PIN_ENCODER_RIGHT = 3;  // INT1
 const int PIN_BATTERY_SENSE = A0;
 const float VOLTAGE_DIVIDER_RATIO = 5.0; // Adjust according to your resistor divider
 
+#if defined(ARDUINO_UNOR4_WIFI) || defined(ARDUINO_UNO_Q) || defined(__ZEPHYR__) || __has_include("Arduino_LED_Matrix.h")
+#include "Arduino_LED_Matrix.h"
+#define HAS_LED_MATRIX 1
+Arduino_LED_Matrix matrix;
+
+// 8 rows x 13 columns bitmap patterns for Arduino UNO Q LED Matrix (Section circled in red)
+uint8_t MATRIX_OK[8][13] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0},
+  {0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0},
+  {0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0},
+  {0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0},
+  {0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+};
+
+uint8_t MATRIX_SOLID[8][13] = {
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+  {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
+};
+
+uint8_t MATRIX_HEART[8][13] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0},
+  {0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0},
+  {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0},
+  {0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0},
+  {0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+  {0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0}
+};
+
+uint8_t MATRIX_HEART_SM[8][13] = {
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0},
+  {0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0},
+  {0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+};
+#else
+#define HAS_LED_MATRIX 0
+#endif
+
+// LED Indicator Pins (Status & Connection Confirmation)
+const int PIN_LED_OK = 13;       // Built-in LED pin (Controls QRB 1 on Uno Q; kept LOW to prevent QRB glow)
+const int PIN_LED_STRIP = 12;    // Waveshare rover LED strip signal pin
+bool led_ok_active = false;
+
 // ============================================================================
 // GLOBAL STATE VARIABLES
 // ============================================================================
@@ -61,6 +119,66 @@ void isr_encoder_left() {
 
 void isr_encoder_right() {
   encoder_right_ticks++;
+}
+
+// ============================================================================
+// LED MATRIX & HEARTBEAT STATUS INDICATOR
+// ============================================================================
+void set_led_state(bool ok, int pattern_type = 0) {
+  led_ok_active = ok;
+  // Strictly keep PIN 13 LOW so the "QRB 1" LED does NOT glow
+  digitalWrite(PIN_LED_OK, LOW);
+  digitalWrite(PIN_LED_STRIP, ok ? HIGH : LOW);
+
+#if HAS_LED_MATRIX
+  if (ok) {
+    if (pattern_type == 1) {
+      matrix.renderBitmap(MATRIX_SOLID, 8, 13);
+      Serial.println(F("{\"status\":\"LED_OK_ACTIVE\",\"led\":\"MATRIX_SOLID\"}"));
+    } else {
+      matrix.renderBitmap(MATRIX_OK, 8, 13);
+      Serial.println(F("{\"status\":\"LED_OK_ACTIVE\",\"led\":\"MATRIX_OK\"}"));
+    }
+  } else {
+    matrix.clear();
+    Serial.println(F("{\"status\":\"LED_OFF\",\"led\":\"OFF\"}"));
+  }
+#else
+  digitalWrite(PIN_LED_OK, ok ? HIGH : LOW);
+  if (ok) {
+    Serial.println(F("{\"status\":\"LED_OK_ACTIVE\",\"led\":\"OK\"}"));
+  } else {
+    Serial.println(F("{\"status\":\"LED_OFF\",\"led\":\"OFF\"}"));
+  }
+#endif
+}
+
+void flash_heartbeat_led() {
+  digitalWrite(PIN_LED_OK, LOW); // Explicitly ensure QRB 1 stays OFF
+  digitalWrite(PIN_LED_STRIP, HIGH);
+
+#if HAS_LED_MATRIX
+  // Pulse heart animation directly on the Arduino UNO Q 8x13 LED Matrix (circled section)
+  matrix.renderBitmap(MATRIX_HEART_SM, 8, 13);
+  delay(120);
+  matrix.renderBitmap(MATRIX_HEART, 8, 13);
+  delay(250);
+  matrix.renderBitmap(MATRIX_HEART_SM, 8, 13);
+  delay(120);
+  matrix.renderBitmap(MATRIX_HEART, 8, 13);
+  delay(300);
+#else
+  delay(90);
+  digitalWrite(PIN_LED_STRIP, LOW);
+  delay(110);
+  digitalWrite(PIN_LED_STRIP, HIGH);
+  delay(180);
+#endif
+
+  digitalWrite(PIN_LED_STRIP, LOW);
+  // Settle back on steady matrix OK state
+  set_led_state(true);
+  Serial.println(F("{\"status\":\"LED_HEARTBEAT_ACTIVE\",\"led\":\"HEART_OK\"}"));
 }
 
 // ============================================================================
@@ -104,9 +222,9 @@ float read_battery_voltage() {
   int raw = analogRead(PIN_BATTERY_SENSE);
   float v_pin = (raw / 1023.0) * 5.0;
   float v_bat = v_pin * VOLTAGE_DIVIDER_RATIO;
-  if (v_bat < 1.0) {
-    // Default simulated voltage if no divider wired
-    v_bat = 12.2;
+  // Strictly return genuine physical sensor reading (no fake 12.2V fallback)
+  if (v_bat < 0.2) {
+    return 0.0;
   }
   return v_bat;
 }
@@ -132,18 +250,39 @@ void parse_command(String cmd) {
   cmd.trim();
   if (cmd.length() == 0) return;
 
-  // Simple, robust zero-RAM string parser for standard Waveshare JSON commands
+  // 1. Heartbeat / Heart Ping: {"cmd":"heart"}, {"pattern":"heart"}, or {"T":135}
+  if (cmd.indexOf("\"cmd\":\"heart\"") >= 0 || cmd.indexOf("\"pattern\":\"heart\"") >= 0 || cmd.indexOf("\"T\":135") >= 0) {
+    flash_heartbeat_led();
+    return;
+  }
+
+  // 2. LED Matrix / OK Command from Python Bridge or Host:
+  //    {"cmd":"led","state":"ok"}, {"pattern":"solid"}, {"pattern":"ok"}, {"state":"off"}
+  if (cmd.indexOf("\"cmd\":\"led\"") >= 0 || cmd.indexOf("\"T\":133") >= 0 || cmd.indexOf("\"state\":\"ok\"") >= 0 || cmd.indexOf("\"pattern\"") >= 0) {
+    if (cmd.indexOf("\"state\":\"off\"") >= 0 || cmd.indexOf("\"state\":\"0\"") >= 0 || cmd.indexOf("\"pattern\":\"off\"") >= 0) {
+      set_led_state(false);
+    } else if (cmd.indexOf("\"pattern\":\"solid\"") >= 0 || cmd.indexOf("\"state\":\"solid\"") >= 0) {
+      set_led_state(true, 1);
+    } else {
+      set_led_state(true, 0);
+    }
+    return;
+  }
+
+  // 3. Emergency Stop
   if (cmd.indexOf("\"T\":0") >= 0) {
     emergency_stop();
     last_cmd_time = millis();
     return;
   }
 
+  // 4. Telemetry Request
   if (cmd.indexOf("\"T\":1001") >= 0) {
     send_telemetry();
     return;
   }
 
+  // 5. Drive Command
   if (cmd.indexOf("\"T\":1") >= 0) {
     int idx_l = cmd.indexOf("\"L\":");
     int idx_r = cmd.indexOf("\"R\":");
@@ -169,6 +308,19 @@ void setup() {
   pinMode(PIN_MOTOR_L_DIR, OUTPUT);
   pinMode(PIN_MOTOR_R_PWM, OUTPUT);
   pinMode(PIN_MOTOR_R_DIR, OUTPUT);
+
+  // Status & LED Strip pins
+  pinMode(PIN_LED_OK, OUTPUT);
+  pinMode(PIN_LED_STRIP, OUTPUT);
+  digitalWrite(PIN_LED_OK, LOW); // Explicitly ensure QRB 1 stays OFF
+  digitalWrite(PIN_LED_STRIP, LOW);
+
+#if HAS_LED_MATRIX
+  matrix.begin();
+  // Keep the 8x13 LED Matrix completely OFF on startup
+  matrix.clear();
+  set_led_state(false);
+#endif
 
   // Encoder input pins with pull-ups
   pinMode(PIN_ENCODER_LEFT, INPUT_PULLUP);

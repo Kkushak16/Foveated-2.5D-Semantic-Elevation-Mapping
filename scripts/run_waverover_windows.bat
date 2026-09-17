@@ -8,14 +8,18 @@ echo   [ROVER] Launching Wave Rover + Foveated LiDAR Bridge (Windows Host PC)
 echo   [ROVER] Microcontroller Target: Arduino Uno / ESP32 (Auto-detecting COM port)
 echo =========================================================================
 
-REM 1. Activate Python virtual environment if available
-if exist ".venv\Scripts\activate.bat" (
-    call .venv\Scripts\activate.bat
+REM Change directory to the project root
+cd /d "%~dp0.."
+
+REM 1. Identify Python executable (prefer .venv)
+set "PYTHON_EXE=python"
+if exist "%~dp0..\.venv\Scripts\python.exe" (
+    set "PYTHON_EXE=%~dp0..\.venv\Scripts\python.exe"
 )
 
 REM 2. Start Python Hardware Bridge
 echo [1/2] Starting Python Hardware Bridge (Port 8081)...
-start "WaveRover Bridge" cmd /k "python python/waverover_bridge.py"
+start "WaveRover Bridge" cmd /k ""%PYTHON_EXE%" python/waverover_bridge.py"
 
 REM 3. Start Node.js Web Dashboard HUD
 echo [2/2] Starting Web Dashboard Server (Port 8080)...

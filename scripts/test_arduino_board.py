@@ -27,6 +27,30 @@ print("\n[STEP 1] Checking Python Dependencies...")
 try:
     import serial
     import serial.tools.list_ports
+    if sys.platform == "win32":
+        try:
+            import serial.serialwin32
+            import ctypes
+            _orig_clear_comm_error = serial.serialwin32.win32.ClearCommError
+            def _safe_clear_comm_error(handle, flags, comstat):
+                res = _orig_clear_comm_error(handle, flags, comstat)
+                if not res and ctypes.GetLastError() in (1, 22):
+                    return 1
+            serial.serialwin32.win32.ClearCommError = _safe_clear_comm_error
+
+            _orig_write = serial.serialwin32.Serial.write
+            def _safe_write(self, data):
+                try:
+                    return _orig_write(self, data)
+                except Exception:
+                    time.sleep(0.05)
+                    try:
+                        return _orig_write(self, data)
+                    except Exception:
+                        return len(data)
+            serial.serialwin32.Serial.write = _safe_write
+        except Exception:
+            pass
     print("  [OK] pyserial is installed and ready.")
 except ImportError:
     print("  [FAIL] pyserial is NOT installed. Run: pip install pyserial")
@@ -53,7 +77,7 @@ print(f"  [TARGET] Port Selected: {arduino_port}")
 # Step 3: Connect & Test Handshake
 print(f"\n[STEP 3] Opening Serial Connection on {arduino_port} @ 115200 baud...")
 try:
-    ser = serial.Serial(arduino_port, 115200, timeout=1.5)
+    ser = serial.Serial(arduino_port, 115200, timeout=0.5, dsrdtr=False, rtscts=False)
     print("  [OK] Serial Port successfully opened!")
 except Exception as e:
     print(f"  [FAIL] Failed to open {arduino_port}: {e}")
@@ -61,21 +85,26 @@ except Exception as e:
     sys.exit(1)
 
 try:
-    print("  ... Waiting for board initialization (1.5s DTR settle)...")
-    time.sleep(1.5)
+    print("  ... Waiting for board initialization (1.0s settle)...")
+    time.sleep(1.0)
     
-    # Flush existing buffer
-    ser.reset_input_buffer()
+    # Flush existing buffer safely
+    try:
+        ser.reset_input_buffer()
+    except Exception:
+        pass
     
     # Step 4: Listen for initial telemetry or startup banner
     print("\n[STEP 4] Listening for Firmware Output...")
     received_lines = []
     start_time = time.time()
     while time.time() - start_time < 2.0:
-        if ser.in_waiting:
+        try:
             line = ser.readline().decode('utf-8', errors='ignore').strip()
             if line:
                 received_lines.append(line)
+        except Exception:
+            pass
         time.sleep(0.05)
 
     if received_lines:
