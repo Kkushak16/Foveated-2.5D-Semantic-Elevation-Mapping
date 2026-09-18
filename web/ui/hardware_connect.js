@@ -983,23 +983,53 @@
             set('hw-t-ring1', data.ring1_cells ?? data.mid_cells ?? '—');
             set('hw-t-ring2', data.ring2_cells ?? data.far_cells ?? '—');
 
-            // Qwen3-VL autopilot
+            // Qwen3-VL autopilot — sync badge and thought from live telemetry
             if (data.qwen_status) {
+                const qs = data.qwen_status;
+                const isActive = qs.autopilot_active || qs.enabled || false;
+                const apMode = qs.autopilot_mode || 'avoid';
+                // Sync local toggle state so UI reflects hardware reality
+                if (hwAutopilotEnabled !== isActive) hwAutopilotEnabled = isActive;
+
                 const badge = document.getElementById('hw-t-autopilot-badge');
-                const thought = document.getElementById('hw-t-thought');
                 if (badge) {
-                    if (data.qwen_status.enabled) {
-                        badge.textContent = 'ACTIVE';
-                        badge.style.background = 'rgba(74,222,128,0.15)';
-                        badge.style.color = '#4ade80';
+                    if (isActive) {
+                        badge.textContent = apMode === 'follow' ? 'FOLLOW' : 'AVOID';
+                        badge.style.background = apMode === 'follow' ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)';
+                        badge.style.color = apMode === 'follow' ? '#34d399' : '#f59e0b';
                     } else {
                         badge.textContent = 'STANDBY';
                         badge.style.background = 'rgba(148,163,184,0.15)';
                         badge.style.color = '#94a3b8';
                     }
                 }
-                if (thought && data.qwen_status.thought) {
-                    thought.textContent = data.qwen_status.thought;
+                const thought = document.getElementById('hw-t-thought');
+                if (thought) {
+                    // Prefer deep-thought CoT from Qwen navigator
+                    const deepThought = qs.pillars && qs.pillars.deeper_thought;
+                    const broadAction = qs.pillars && qs.pillars.broader_action;
+                    if (deepThought) {
+                        thought.textContent = deepThought;
+                    } else if (qs.thought) {
+                        thought.textContent = qs.thought;
+                    } else if (broadAction) {
+                        thought.textContent = broadAction;
+                    }
+                }
+                // Sync autopilot toggle button state with hardware
+                const apBtn = document.getElementById('hw-btn-autopilot-toggle');
+                if (apBtn) {
+                    if (isActive) {
+                        apBtn.textContent = '🛑 Disable Auto-Pilot';
+                        apBtn.style.background = 'rgba(239,68,68,0.18)';
+                        apBtn.style.borderColor = '#ef4444';
+                        apBtn.style.color = '#f87171';
+                    } else if (!apBtn.textContent.includes('Enable')) {
+                        apBtn.textContent = '🤖 Enable Auto-Pilot';
+                        apBtn.style.background = 'rgba(56,189,248,0.08)';
+                        apBtn.style.borderColor = 'rgba(56,189,248,0.5)';
+                        apBtn.style.color = '#38bdf8';
+                    }
                 }
             }
 

@@ -175,6 +175,8 @@ class WaveRoverESP32:
     def _set_matrix_ok_all_transports(self):
         """Force 8x13 matrix to OK via every available transport (serial + daemon + WiFi).
         Used after any successful connect so Matrix NEVER stays dark after reconnect.
+        After showing OK for 2.5 seconds, automatically switches to random animations
+        so the user sees the board is live — it cycles back to OK on the next ping.
         """
         # QRB Linux LEDs
         try:
@@ -183,6 +185,7 @@ class WaveRoverESP32:
             pass
         # Serial MCU (Arduino firmware 8x13 matrix + strip HIGH)
         try:
+            # First: force OK display
             self.send_cmd({"cmd": "led", "pattern": "ok", "state": "ok", "T": 133})
             self.send_cmd({"cmd": "led_mode", "mode": "ok", "T": 136})
             if self.ser:
@@ -222,6 +225,18 @@ class WaveRoverESP32:
             except Exception:
                 pass
         print("[WAVE_ROVER] Matrix forced to OK on all transports (reconnect).")
+        # After 2.5s, switch to random animations so the board looks alive while connected.
+        # This runs in a background thread so it doesn't block the connect handshake.
+        def _switch_to_random_after_ok():
+            time.sleep(2.5)
+            if self.connected and not getattr(self, 'user_disconnected', False):
+                try:
+                    self.send_cmd({"cmd": "led_mode", "mode": "random", "T": 136})
+                    if self.ser:
+                        self.ser.write(b'{"cmd":"led_mode","mode":"random","T":136}\n')
+                except Exception:
+                    pass
+        threading.Thread(target=_switch_to_random_after_ok, daemon=True).start()
 
     def _send_led_ok(self):
         """Signal the Arduino Uno Q and firmware to display 'OK'."""
@@ -912,6 +927,7 @@ class WaveRoverESP32:
         last_req = 0
         last_presence_check = 0
         last_temp_check = 0
+        last_serial_keepalive = 0  # Tracks last serial keepalive sent to Arduino
         while True:
             now = time.time()
 
@@ -960,6 +976,19 @@ class WaveRoverESP32:
                             self._do_connect()
                     except Exception:
                         pass
+
+            # --- SERIAL KEEPALIVE (critical!) ---
+            # The Arduino firmware has a 3.5s watchdog: if no serial bytes arrive,
+            # it plays the disconnect animation and kills all LEDs.  We must
+            # send {"T":1001} (telemetry-request) every 1.0s over serial to keep
+            # the watchdog alive and the LED matrix displaying correctly.
+            if self.connected and self.ser and (now - last_serial_keepalive > 1.0):
+                last_serial_keepalive = now
+                try:
+                    with self.lock:
+                        self.ser.write(b'{"T":1001}\n')
+                except Exception:
+                    pass
 
             # Periodically query real hardware temperature every 2.5 seconds
             if self.connected and (now - last_temp_check > 2.5):
