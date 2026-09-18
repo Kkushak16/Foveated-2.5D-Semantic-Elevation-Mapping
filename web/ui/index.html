@@ -1179,19 +1179,48 @@ void process_scan(const FoveatedPointBuffer& scan) {
                             <input type="text" class="hw-input" id="hw-bridge-host" value="http://localhost:8081" placeholder="http://localhost:8081">
                         </div>
                         <div>
+                            <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Rover Wi-Fi / ESP32 IP</label>
+                            <input type="text" class="hw-input" id="hw-rover-ip" value="192.168.4.1" placeholder="192.168.4.1" style="min-width:140px;">
+                        </div>
+                        <div>
                             <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Serial Port / Auto-Detect</label>
-                            <input type="text" class="hw-input" id="hw-serial-port" value="Auto-Detect" placeholder="COM3 or /dev/ttyUSB0" style="min-width:160px;">
+                            <input type="text" class="hw-input" id="hw-serial-port" value="Auto-Detect" placeholder="COM3 or /dev/ttyUSB0" style="min-width:140px;">
                         </div>
                         <div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap;">
-                            <button class="hw-btn-primary" id="hw-btn-connect" onclick="hwAttemptConnect()">🔌 Connect to Rover</button>
+                            <button class="hw-btn-primary" id="hw-btn-connect" onclick="hwAttemptConnect()">🔌 Connect Rover &amp; Verify Wheels</button>
                             <button class="hw-btn-secondary" id="hw-btn-disconnect" onclick="hwDisconnect()" style="display: none; background: #dc2626; border-color: #ef4444; color: #ffffff; font-weight: 600;">🛑 Disconnect</button>
-                            <button class="hw-btn-secondary" id="hw-btn-ping-led" onclick="hwPingLedSignal()" style="background: rgba(236, 72, 153, 0.15); border: 1px solid rgba(236, 72, 153, 0.45); color: #f472b6; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;" title="Check hardware status & display Heart/OK on Arduino LED">💓 Check Board &amp; Flash LED</button>
+                            <button class="hw-btn-secondary" id="hw-btn-ping-led" onclick="hwPingLedSignal()" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.45); color: #34d399; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 6px;" title="Check board status and display OK on the Arduino 8x13 LED matrix">✨ Check Board &amp; Show OK</button>
                         </div>
                     </div>
 
                     <div id="hw-connection-status" style="font-size: 0.82rem; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; margin-top: 8px;">
                         <span class="hw-status-dot disconnected" id="hw-status-dot"></span>
                         <span id="hw-status-text">Not connected — Enter bridge endpoint and click Connect</span>
+                    </div>
+
+                    <!-- LED Matrix Pattern Control Strip -->
+                    <div class="hw-led-mode-container" style="margin-top: 14px; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                            <span style="font-size:0.82rem; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                                ✨ Arduino Uno Q 8x13 LED Matrix Patterns
+                            </span>
+                            <span id="hw-led-active-badge" style="font-size:0.72rem; padding:2px 8px; border-radius:12px; background:rgba(16,185,129,0.15); color:#34d399; font-family:var(--font-mono); font-weight:700;">
+                                ACTIVE: OK
+                            </span>
+                        </div>
+                        <div style="font-size:0.73rem; color:var(--text-secondary); margin-bottom:10px;">
+                            Select an idle pattern for the board. When driving the rover with WASD or arrows, the 8x13 LED matrix dynamically projects directional arrows (⬆️ ⬇️ ⬅️ ➡️) and returns to your selected pattern when stopped.
+                        </div>
+                        <div class="hw-led-btn-group" style="display:flex; flex-wrap:wrap; gap:8px;">
+                            <button class="hw-led-mode-btn active" data-mode="ok" onclick="hwSetLedMode('ok', this)">🟢 OK</button>
+                            <button class="hw-led-mode-btn" data-mode="wave" onclick="hwSetLedMode('wave', this)">🌊 Waves</button>
+                            <button class="hw-led-mode-btn" data-mode="snake" onclick="hwSetLedMode('snake', this)">🐍 Snake</button>
+                            <button class="hw-led-mode-btn" data-mode="fast" onclick="hwSetLedMode('fast', this)">⚡ Fast Lights</button>
+                            <button class="hw-led-mode-btn" data-mode="random" onclick="hwSetLedMode('random', this)">🎲 Matrix Rain</button>
+                            <button class="hw-led-mode-btn" data-mode="flicker" onclick="hwSetLedMode('flicker', this)">✨ Flicker</button>
+                            <button class="hw-led-mode-btn" data-mode="heart" onclick="hwSetLedMode('heart', this)">❤️ Heart</button>
+                            <button class="hw-led-mode-btn" data-mode="off" onclick="hwSetLedMode('off', this)" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.45); color: #f87171;">⚫ Turn OFF</button>
+                        </div>
                     </div>
                 </div>
 
@@ -1243,12 +1272,20 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <!-- Camera Feed Tab -->
                     <div id="hw-tab-camera" class="hw-live-tab-content">
                         <div class="hw-live-panel">
-                            <div class="hw-live-panel-header">
+                            <div class="hw-live-panel-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
                                 <span class="hw-live-panel-title">📹 Real-Time Video Feed — Live from Rover Camera</span>
-                                <span style="font-size:0.72rem; color: var(--accent-green); font-family: var(--font-mono);">● STREAMING</span>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <button id="hw-btn-mirror" class="hw-ctrl-btn" onclick="hwToggleMirror()" title="Toggle Camera Mirror View">🪞 Mirror: OFF</button>
+                                    <button id="hw-btn-fullscreen" class="hw-ctrl-btn" onclick="hwToggleFullscreen('hw-camera-panel-container')" title="Expand to Fullscreen">⛶ Fullscreen</button>
+                                    <span style="font-size:0.72rem; color: var(--accent-green); font-family: var(--font-mono);">● STREAMING</span>
+                                </div>
                             </div>
-                            <div class="hw-live-panel-body">
-                                <img id="hw-camera-feed" src="" alt="Waiting for camera feed..." style="background:#000000;">
+                            <div id="hw-camera-panel-container" class="hw-live-panel-body hw-fullscreen-container" style="position:relative;">
+                                <img id="hw-camera-feed" src="" alt="Waiting for camera feed..." style="background:#000000; width:100%; height:auto; display:block; transition:transform 0.2s cubic-bezier(0.16,1,0.3,1);">
+                                <div class="hw-fullscreen-overlay">
+                                    <button onclick="hwToggleMirror()" class="hw-ctrl-btn" style="background:rgba(0,0,0,0.7); backdrop-filter:blur(6px);">🪞 Mirror</button>
+                                    <button onclick="hwToggleFullscreen('hw-camera-panel-container')" class="hw-ctrl-btn" style="background:rgba(239,68,68,0.35); border-color:#ef4444; color:#ffffff;">✕ Exit Fullscreen</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1270,12 +1307,19 @@ void process_scan(const FoveatedPointBuffer& scan) {
                     <div id="hw-tab-split" class="hw-live-tab-content hw-section-hidden">
                         <div class="hw-live-dash">
                             <div class="hw-live-panel">
-                                <div class="hw-live-panel-header">
+                                <div class="hw-live-panel-header" style="display:flex; justify-content:space-between; align-items:center;">
                                     <span class="hw-live-panel-title">📹 Camera Feed</span>
-                                    <span style="font-size:0.72rem; color: var(--accent-green); font-family: var(--font-mono);">● LIVE</span>
+                                    <div style="display:flex; gap:6px; align-items:center;">
+                                        <button class="hw-ctrl-btn" onclick="hwToggleMirror()" title="Toggle Mirror">🪞 Mirror</button>
+                                        <button class="hw-ctrl-btn" onclick="hwToggleFullscreen('hw-camera-split-container')" title="Fullscreen">⛶ Fullscreen</button>
+                                    </div>
                                 </div>
-                                <div class="hw-live-panel-body">
-                                    <img id="hw-camera-feed-split" src="" alt="Camera" style="background:#000000;">
+                                <div id="hw-camera-split-container" class="hw-live-panel-body hw-fullscreen-container" style="position:relative;">
+                                    <img id="hw-camera-feed-split" src="" alt="Camera" style="background:#000000; width:100%; height:auto; display:block; transition:transform 0.2s cubic-bezier(0.16,1,0.3,1);">
+                                    <div class="hw-fullscreen-overlay">
+                                        <button onclick="hwToggleMirror()" class="hw-ctrl-btn" style="background:rgba(0,0,0,0.7); backdrop-filter:blur(6px);">🪞 Mirror</button>
+                                        <button onclick="hwToggleFullscreen('hw-camera-split-container')" class="hw-ctrl-btn" style="background:rgba(239,68,68,0.35); border-color:#ef4444; color:#ffffff;">✕ Exit Fullscreen</button>
+                                    </div>
                                 </div>
                             </div>
                             <div class="hw-live-panel">
@@ -1340,18 +1384,79 @@ void process_scan(const FoveatedPointBuffer& scan) {
                                 <span id="hw-t-autopilot-badge" style="font-size:0.72rem; padding:3px 10px; border-radius:6px; background:rgba(148,163,184,0.15); color:#94a3b8; font-weight:700; font-family:var(--font-mono);">STANDBY</span>
                             </div>
                             <div id="hw-t-thought" style="font-size:0.8rem; color:var(--text-secondary); font-family:var(--font-mono); background:rgba(0,0,0,0.4); padding:10px 14px; border-radius:8px; min-height:36px; border:1px solid rgba(255,255,255,0.06);">Waiting for Qwen3-VL neural perception telemetry...</div>
+                            <!-- Autonomous Controls: ped/car avoidance + team follow -->
+                            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px;">
+                                <button id="hw-btn-autopilot-toggle" onclick="hwToggleAutopilot()" style="padding:8px 16px; border-radius:8px; font-size:0.82rem; font-weight:700; border:1.5px solid rgba(56,189,248,0.5); background:rgba(56,189,248,0.08); color:#38bdf8; cursor:pointer; transition:all 0.2s;">🤖 Enable Auto-Pilot</button>
+                                <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.35); padding:4px; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
+                                    <button id="hw-autopilot-mode-avoid" class="hw-autopilot-mode-btn active" onclick="hwSetAutopilotMode('avoid')" style="padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:600; border:none; cursor:pointer; background:rgba(245,158,11,0.2); color:#f59e0b;">🛡️ Auto-Avoid: Ped/Car</button>
+                                    <button id="hw-autopilot-mode-follow" class="hw-autopilot-mode-btn" onclick="hwSetAutopilotMode('follow')" style="padding:6px 12px; border-radius:6px; font-size:0.78rem; font-weight:600; border:none; cursor:pointer; background:transparent; color:#94a3b8;">👥 Follow Person (Team)</button>
+                                </div>
+                                <span style="font-size:0.72rem; color:#94a3b8; font-family:var(--font-mono);">Avoid bumping • Follow keeps 1.2–1.5 m gap</span>
+                            </div>
+                            <div id="hw-autopilot-hint" style="font-size:0.72rem; color:#64748b; margin-top:8px; font-family:var(--font-mono);">Tip: In Follow mode, walk in front of the camera — rover tracks your team and maintains distance automatically.</div>
                         </div>
                     </div>
 
                     <!-- Teleop Controls -->
-                    <div class="hw-connect-panel" style="margin-top: 12px; text-align: center;">
-                        <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.08em;">Direct Teleoperation Drive Controls (WASD / Keyboard Arrows)</div>
-                        <div style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap;">
+                    <div class="hw-connect-panel" id="hw-teleop-panel" style="margin-top: 12px; text-align: center; position: relative;">
+                        <div style="font-size: 0.72rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.08em; display: flex; justify-content: center; align-items: center; gap: 8px;">
+                            <span>Direct Teleoperation Drive Controls (WASD / Keyboard Arrows)</span>
+                            <span id="hw-teleop-lock-badge" style="font-size: 0.68rem; padding: 2px 8px; border-radius: 4px; background: rgba(239,68,68,0.2); color: #f87171; font-family: var(--font-mono); font-weight: 700;">🔒 LOCKED: CONNECT ROVER</span>
+                        </div>
+                        <div id="hw-teleop-button-group" style="display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; opacity: 0.45; pointer-events: none; transition: all 0.3s ease;">
                             <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('forward')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('forward')" ontouchend="hwTeleop('stop')">▲ W</button>
                             <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('left')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('left')" ontouchend="hwTeleop('stop')">◀ A</button>
                             <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('backward')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('backward')" ontouchend="hwTeleop('stop')">▼ S</button>
                             <button class="hw-teleop-btn" style="min-width: 60px;" onmousedown="hwTeleop('right')" onmouseup="hwTeleop('stop')" ontouchstart="hwTeleop('right')" ontouchend="hwTeleop('stop')">▶ D</button>
                             <button class="hw-teleop-btn hw-teleop-stop" style="min-width: 90px;" onclick="hwTeleop('stop')">■ STOP</button>
+                        </div>
+                    </div>
+
+                    <!-- 3D Spatial Simulation & Hardware Compute Benchmark Engine -->
+                    <div class="hw-connect-panel" style="margin-top: 14px; background: linear-gradient(135deg, rgba(15,23,42,0.85) 0%, rgba(30,41,59,0.7) 100%); border: 1px solid rgba(56,189,248,0.25); border-radius: 12px; padding: 16px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+                            <div>
+                                <div style="font-size:0.92rem; font-weight:700; color:#f8fafc; display:flex; align-items:center; gap:8px;">
+                                    <span>⚡</span> 3D Spatial Simulation &amp; Hardware Benchmark Engine
+                                </div>
+                                <div style="font-size:0.74rem; color:#94a3b8; margin-top:3px;">
+                                    Execute 15,000 spatial raycast &amp; 2.5D concentric ring occupancy grid projections to measure and compare compute benchmarks.
+                                </div>
+                            </div>
+                            <!-- Compute Target Toggle -->
+                            <div class="hw-bench-selector" style="display:flex; gap:6px; background:rgba(0,0,0,0.45); padding:4px; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
+                                <button id="hw-bench-target-computer" class="hw-bench-tab active" onclick="hwSelectBenchmarkTarget('computer')">💻 Computer CPU</button>
+                                <button id="hw-bench-target-hardware" class="hw-bench-tab" onclick="hwSelectBenchmarkTarget('hardware')">🛰️ Connected Hardware CPU</button>
+                            </div>
+                        </div>
+
+                        <!-- Action Button & Benchmark Results Dashboard -->
+                        <div style="display:flex; gap:14px; align-items:stretch; flex-wrap:wrap;">
+                            <button id="hw-btn-run-benchmark" class="hw-btn-primary" onclick="hwRunBenchmark()" style="min-width:170px; display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700; background:linear-gradient(135deg, #0284c7 0%, #0369a1 100%);">
+                                🚀 Run Benchmark
+                            </button>
+                            <div id="hw-bench-results" style="flex:1; display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:10px; background:rgba(0,0,0,0.35); padding:10px 14px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                                <div>
+                                    <div style="font-size:0.67rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">Target Engine</div>
+                                    <div id="hw-b-target-name" style="font-size:0.85rem; font-weight:700; color:#38bdf8; margin-top:2px;">Host Computer CPU</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.67rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">Execution Latency</div>
+                                    <div id="hw-b-duration" style="font-size:0.85rem; font-weight:700; color:#34d399; margin-top:2px;">—</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.67rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">Compute Throughput</div>
+                                    <div id="hw-b-throughput" style="font-size:0.85rem; font-weight:700; color:#f59e0b; margin-top:2px;">—</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.67rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">SoC Thermal (ΔT)</div>
+                                    <div id="hw-b-thermals" style="font-size:0.85rem; font-weight:700; color:#a78bfa; margin-top:2px;">—</div>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.67rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em;">Efficiency Profile</div>
+                                    <div id="hw-b-rating" style="font-size:0.85rem; font-weight:700; color:#e2e8f0; margin-top:2px;">—</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

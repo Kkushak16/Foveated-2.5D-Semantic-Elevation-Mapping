@@ -319,50 +319,86 @@
         await hwAttemptConnect();
     }
 
+    function hwUpdateTeleopLock(unlocked) {
+        const badge = document.getElementById('hw-teleop-lock-badge');
+        const group = document.getElementById('hw-teleop-button-group');
+        if (badge) {
+            badge.style.background = unlocked ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)';
+            badge.style.color = unlocked ? '#34d399' : '#f87171';
+            badge.textContent = unlocked ? '🟢 UNLOCKED: ROVER READY' : '🔒 LOCKED: CONNECT ROVER';
+        }
+        if (group) {
+            group.style.opacity = unlocked ? '1' : '0.45';
+            group.style.pointerEvents = unlocked ? 'auto' : 'none';
+        }
+    }
+
     // ─── Primary Connection Handler ───────────────────────────
-    async function hwAttemptConnect() {
+    async function hwAttemptConnect(retriedWithAutoStart = false) {
         hwBridgeHost = (document.getElementById('hw-bridge-host')?.value || 'http://localhost:8081').replace(/\/+$/, '');
+        const roverIp = (document.getElementById('hw-rover-ip')?.value || '192.168.4.1').trim();
         const btn = document.getElementById('hw-btn-connect');
         const btnDis = document.getElementById('hw-btn-disconnect');
         if (btn) {
             btn.disabled = true;
-            btn.textContent = '⏳ Probing Rover...';
+            btn.textContent = '⏳ Verifying Rover Wheels...';
         }
 
-        hwSetStatus('connecting', 'Probing Python bridge at ' + hwBridgeHost + ' (Checking physical Arduino Uno Q)...');
+        hwSetStatus('connecting', `Probing Rover at IP <strong>${roverIp}</strong> & Arduino Uno Q...`);
 
         try {
+            // Explicitly connect to Rover IP and trigger wheel verification wiggle
+            try {
+                await fetch(hwBridgeHost + '/api/rover/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: roverIp })
+                });
+            } catch (_) {}
+
+            // Robust dual-endpoint fetch: direct 8081 and via node proxy (8080).
+            // Earlier fallback only tried proxy on network error, so a stale 8081
+            // "disconnected" payload masked a healthy proxy "connected" (COM3/Daemon).
+            // Now we try both and prefer any "connected:true".
             let data = null;
+            let dataProxy = null;
             try {
                 const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3500) });
                 if (res.ok) data = await res.json();
-            } catch (e) {
-                try {
-                    const res = await fetch('/api/rover/status', { signal: AbortSignal.timeout(3500) });
-                    if (res.ok) {
-                        data = await res.json();
-                        hwBridgeHost = window.location.origin;
-                        const hostInput = document.getElementById('hw-bridge-host');
-                        if (hostInput) hostInput.value = hwBridgeHost;
-                    }
-                } catch (_) {}
+            } catch (_) {}
+            try {
+                const res2 = await fetch('/api/rover/status', { signal: AbortSignal.timeout(3500) });
+                if (res2.ok) dataProxy = await res2.json();
+            } catch (_) {}
+            // Prefer the connected one, otherwise keep direct
+            if (dataProxy && dataProxy.connected && (!data || !data.connected)) {
+                data = dataProxy;
+                hwBridgeHost = window.location.origin;
+                const hostInput = document.getElementById('hw-bridge-host');
+                if (hostInput) hostInput.value = hwBridgeHost;
+            } else if (!data && dataProxy) {
+                data = dataProxy;
+                hwBridgeHost = window.location.origin;
+                const hostInput = document.getElementById('hw-bridge-host');
+                if (hostInput) hostInput.value = hwBridgeHost;
             }
             if (!data) throw new Error('Bridge not detected');
 
             if (!data.connected) {
                 hwIsConnected = false;
+                hwUpdateTeleopLock(false);
                 hwSetStatus('disconnected', `
                     <div style="display:flex; flex-direction:column; gap:4px;">
-                        <span style="color:#ef4444; font-weight:700;">🔴 Arduino Uno Q Not Detected</span>
+                        <span style="color:#ef4444; font-weight:700;">🔴 Rover / Arduino Not Reachable</span>
                         <span style="color:var(--text-secondary); font-size:0.75rem;">
-                            Bridge service is online, but no board is detected on USB. Please connect your Arduino Uno Q via USB-C cable.
+                            Bridge is online, but neither Arduino Uno Q on USB nor Rover at ${roverIp} responded. Verify Rover is powered and Uno Q is connected.
                         </span>
                     </div>
                 `);
                 hwResetMetricsToDisconnected();
                 if (btn) {
                     btn.disabled = false;
-                    btn.textContent = '🔌 Connect to Rover';
+                    btn.textContent = '🔌 Connect Rover & Verify Wheels';
                     btn.style.background = '';
                 }
                 if (btnDis) btnDis.style.display = 'none';
@@ -370,8 +406,14 @@
             }
 
             hwIsConnected = true;
-            const detectedMcu = data.hardware || hwSelectedDevice || 'Arduino Uno Q (Flagship USB-C)';
-            hwSetStatus('connected', `Connected ✓ — <strong>${detectedMcu}</strong> active on ${data.port || 'COM3'}`);
+            hwUpdateTeleopLock(true);
+            const detectedMcu = data.hardware || hwSelectedDevice || 'Arduino Uno Q + Wave Rover 4WD';
+            hwSetStatus('connected', `Connected ✓ — <strong>${detectedMcu}</strong> active! Wheel verification test confirmed &amp; controls unlocked.`);
+
+            // Automatically signal OK on Arduino LEDs
+            setTimeout(() => {
+                fetch(hwBridgeHost + '/api/rover/ping_led', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).catch(() => {});
+            }, 300);
 
             // Show live dashboard
             const dash = document.getElementById('hw-live-dashboard');
@@ -389,7 +431,7 @@
 
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '✓ Connected';
+                btn.textContent = '✓ Rover Connected';
                 btn.style.background = 'linear-gradient(180deg, #10b981 0%, #059669 100%)';
             }
             if (btnDis) {
@@ -397,13 +439,28 @@
             }
 
         } catch (err) {
+            // If bridge is offline and we haven't attempted auto-launch yet, try starting it via server
+            if (!retriedWithAutoStart) {
+                try {
+                    hwSetStatus('connecting', 'Bridge offline — launching hardware bridge on port 8081...');
+                    const sRes = await fetch('/api/bridge/start');
+                    if (sRes.ok) {
+                        await new Promise(r => setTimeout(r, 1600));
+                        return await hwAttemptConnect(true);
+                    }
+                } catch (_) {}
+            }
+
             hwIsConnected = false;
             hwResetMetricsToDisconnected();
             hwSetStatus('disconnected', `
                 <div style="display:flex; flex-direction:column; gap:6px;">
                     <span>⚠️ Bridge not detected at <code>${hwBridgeHost}</code>.</span>
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:3px;">
+                        <button onclick="window.hwAttemptConnect(false)" style="background:#2563eb; color:#fff; border:none; padding:5px 12px; border-radius:4px; font-size:0.75rem; cursor:pointer; font-weight:600;">⚡ Launch Bridge & Connect</button>
+                    </div>
                     <span style="color:var(--text-secondary); font-size:0.75rem;">
-                        To start the hardware bridge, run: <code>python python/waverover_bridge.py</code>
+                        Manual terminal command: <code>.\\.venv\\Scripts\\python.exe python/waverover_bridge.py</code>
                     </span>
                 </div>
             `);
@@ -437,7 +494,15 @@
                 headers: { 'Content-Type': 'application/json' },
                 signal: AbortSignal.timeout(1500)
             });
-        } catch (e) {}
+        } catch (e) {
+            try {
+                await fetch('/api/rover/disconnect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: AbortSignal.timeout(1500)
+                });
+            } catch (_) {}
+        }
 
         hwResetMetricsToDisconnected();
         hwSetStatus('disconnected', '🔴 Disconnected — Board connection released by user.');
@@ -445,21 +510,43 @@
         const btn = document.getElementById('hw-btn-connect');
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '🔌 Connect to Rover';
+            btn.textContent = '🔌 Connect Rover & Verify Wheels';
             btn.style.background = '';
         }
+        hwUpdateTeleopLock(false);
         const btnDis = document.getElementById('hw-btn-disconnect');
         if (btnDis) btnDis.style.display = 'none';
     }
 
-    // ─── Hardware LED Ping / Heartbeat Check ─────────────────
+    // ─── Hardware LED Ping / OK Check ────────────────────────
+    // Option A fix: Check Board now binds the rover IP first, then lights the
+    // 8x13 matrix. Previously it ignored the IP field and only tried the
+    // daemon, so only QRB 1/2 glowed and 'OK' never appeared.
     async function hwPingLedSignal() {
         const pingBtn = document.getElementById('hw-btn-ping-led');
-        const origText = pingBtn ? pingBtn.innerHTML : '💓 Check Board & Flash LED';
+        const origText = pingBtn ? pingBtn.innerHTML : '✨ Check Board & Show OK';
         if (pingBtn) {
             pingBtn.disabled = true;
             pingBtn.innerHTML = '⏳ Checking...';
             pingBtn.style.opacity = '0.75';
+        }
+
+        // 0) Bind the IP the user typed (e.g. 192.168.4.1) to the bridge BEFORE pinging,
+        // so the matrix + wheel path uses the correct device IP.
+        const roverIpForPing = (document.getElementById('hw-rover-ip')?.value || '192.168.4.1').trim();
+        if (roverIpForPing) {
+            const hostPre = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || '').replace(/\/+$/, '') || hwBridgeHost;
+            for (const base of [hostPre, window.location.origin]) {
+                try {
+                    await fetch(base + '/api/rover/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip: roverIpForPing }),
+                        signal: AbortSignal.timeout(2000)
+                    });
+                    break;
+                } catch (_) {}
+            }
         }
 
         try {
@@ -470,7 +557,7 @@
                 const res = await fetch(host + '/api/rover/ping_led', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    signal: AbortSignal.timeout(2500)
+                    signal: AbortSignal.timeout(3500)
                 });
                 if (res.ok) data = await res.json();
             } catch (e) {
@@ -478,7 +565,7 @@
                     const res = await fetch('/api/rover/ping_led', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        signal: AbortSignal.timeout(2500)
+                        signal: AbortSignal.timeout(3500)
                     });
                     if (res.ok) data = await res.json();
                 } catch (_) {}
@@ -487,17 +574,29 @@
 
             if (data.connected) {
                 if (pingBtn) {
-                    pingBtn.innerHTML = '💖 Heart / OK LED Sent!';
-                    pingBtn.style.background = 'linear-gradient(135deg, rgba(236,72,153,0.35) 0%, rgba(16,185,129,0.35) 100%)';
+                    pingBtn.innerHTML = '✅ OK Displayed on LED!';
+                    pingBtn.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.35) 0%, rgba(5,150,105,0.35) 100%)';
                     pingBtn.style.borderColor = '#10b981';
                     pingBtn.style.color = '#34d399';
                 }
-                hwSetStatus('connected', `✅ <strong>${data.hardware || 'Arduino Uno Q'}</strong> Confirmed! Sent Heartbeat & OK signal to LED.`);
+                hwSetStatus('connected', `✅ <strong>${data.hardware || 'Arduino Uno Q'}</strong> Confirmed! Sent 'OK' signal to 8x13 LED Matrix. Wheel wiggle running — you can now drive with WASD.`);
 
-                // If not currently connected in UI state, trigger connection setup
-                if (!hwIsConnected) {
-                    hwAttemptConnect();
+                // Promote UI to connected and unlock teleop immediately (IP-first flow).
+                hwIsConnected = true;
+                hwUpdateTeleopLock(true);
+                const dash = document.getElementById('hw-live-dashboard');
+                if (dash) dash.style.display = 'block';
+                if (!hwPollInterval) hwPollInterval = setInterval(hwPollTelemetry, 350);
+                hwStartBEVRenderer();
+                hwStartCameraFeed();
+                const btn = document.getElementById('hw-btn-connect');
+                if (btn) {
+                    btn.textContent = '✓ Rover Connected';
+                    btn.style.background = 'linear-gradient(180deg, #10b981 0%, #059669 100%)';
+                    btn.disabled = false;
                 }
+                const btnDis = document.getElementById('hw-btn-disconnect');
+                if (btnDis) btnDis.style.display = 'inline-block';
             } else {
                 if (pingBtn) {
                     pingBtn.innerHTML = '🔴 Not Connected';
@@ -505,16 +604,50 @@
                     pingBtn.style.borderColor = '#ef4444';
                     pingBtn.style.color = '#f87171';
                 }
-                hwSetStatus('disconnected', `🔴 ${data.message || 'Arduino is not connected. Please connect USB-C cable.'}`);
+                hwSetStatus('disconnected', `🔴 ${data.message || 'Arduino is not connected. For IP rover: ensure laptop is on rover WiFi (192.168.4.1) and IP in field is correct, then click Connect.'}`);
             }
         } catch (err) {
-            if (pingBtn) {
-                pingBtn.innerHTML = '⚠️ Bridge Offline';
-                pingBtn.style.background = 'rgba(245, 158, 11, 0.2)';
-                pingBtn.style.borderColor = '#f59e0b';
-                pingBtn.style.color = '#fbbf24';
+            // Bridge offline — try to auto-launch it via Node helper then retry once
+            let retried = false;
+            try {
+                const sRes = await fetch('/api/bridge/start', { signal: AbortSignal.timeout(2000) });
+                if (sRes && sRes.ok) {
+                    await new Promise(r => setTimeout(r, 1200));
+                    const host2 = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || '').replace(/\/+$/, '') || hwBridgeHost;
+                    let d2 = null;
+                    try {
+                        const r2 = await fetch(host2 + '/api/rover/ping_led', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(3000) });
+                        if (r2.ok) d2 = await r2.json();
+                    } catch (_) {
+                        try { const r2 = await fetch('/api/rover/ping_led', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(3000) }); if (r2.ok) d2 = await r2.json(); } catch (_) {}
+                    }
+                    if (d2 && d2.connected) {
+                        retried = true;
+                        if (pingBtn) {
+                            pingBtn.innerHTML = '✅ OK Displayed on LED!';
+                            pingBtn.style.background = 'linear-gradient(135deg, rgba(16,185,129,0.35) 0%, rgba(5,150,105,0.35) 100%)';
+                            pingBtn.style.borderColor = '#10b981';
+                            pingBtn.style.color = '#34d399';
+                        }
+                        hwSetStatus('connected', `✅ <strong>${d2.hardware || 'Arduino Uno Q'}</strong> Confirmed via bridge restart! Wheel wiggle running.`);
+                        hwIsConnected = true;
+                        hwUpdateTeleopLock(true);
+                        const dash = document.getElementById('hw-live-dashboard');
+                        if (dash) dash.style.display = 'block';
+                        if (!hwPollInterval) hwPollInterval = setInterval(hwPollTelemetry, 350);
+                        hwStartBEVRenderer(); hwStartCameraFeed();
+                    }
+                }
+            } catch (_) {}
+            if (!retried) {
+                if (pingBtn) {
+                    pingBtn.innerHTML = '⚠️ Bridge Offline';
+                    pingBtn.style.background = 'rgba(245, 158, 11, 0.2)';
+                    pingBtn.style.borderColor = '#f59e0b';
+                    pingBtn.style.color = '#fbbf24';
+                }
+                hwSetStatus('disconnected', `⚠️ Bridge service offline at <code>${hwBridgeHost}</code>. Click "Connect Rover & Verify Wheels" to auto-launch the bridge, or run <code>python python/waverover_bridge.py</code>`);
             }
-            hwSetStatus('disconnected', `⚠️ Bridge service offline at <code>${hwBridgeHost}</code>. Run <code>python python/waverover_bridge.py</code>`);
         } finally {
             setTimeout(() => {
                 if (pingBtn) {
@@ -732,8 +865,24 @@
 
         const start = performance.now();
         try {
-            const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3000) });
-            const data = await res.json();
+            let data = null;
+            try {
+                const res = await fetch(hwBridgeHost + '/api/rover/status', { signal: AbortSignal.timeout(3000) });
+                if (res.ok) data = await res.json();
+            } catch (_) {}
+            // If direct says disconnected but proxy says connected, prefer proxy (covers 8081 vs 8080 split)
+            if (!data || !data.connected) {
+                try {
+                    const res2 = await fetch('/api/rover/status', { signal: AbortSignal.timeout(3000) });
+                    if (res2.ok) {
+                        const d2 = await res2.json();
+                        if (d2 && d2.connected) data = d2;
+                        else if (!data) data = d2;
+                    }
+                } catch (_) {}
+            }
+            if (!data) throw new Error('no telemetry');
+            //
 
             // CRITICAL: Actively detect physical hardware disconnection!
             if (!data.connected) {
@@ -802,10 +951,21 @@
                 set('hw-m-temp', '—');
             }
 
-            // Battery Voltage
+            // Battery Voltage & Pack Level
             const bat = data.battery ?? data.voltage ?? data.battery_voltage ?? null;
             if (bat !== null && bat !== undefined) {
-                set('hw-m-battery', parseFloat(bat).toFixed(1) + 'V');
+                const v = parseFloat(bat);
+                const pct = data.battery_pct !== null && data.battery_pct !== undefined ? data.battery_pct : null;
+                let label = v.toFixed(1) + 'V';
+                if (pct !== null) label += ` (${pct}%)`;
+                set('hw-m-battery', label);
+
+                const sub = document.getElementById('hw-m-battery-sub');
+                if (sub) {
+                    if (v >= 10.0) sub.textContent = '3S LiPo Pack Active';
+                    else if (v >= 6.0) sub.textContent = '2S LiPo Pack Active';
+                    else sub.textContent = 'USB / Board Logic Rail';
+                }
             } else {
                 set('hw-m-battery', '—');
             }
@@ -1030,7 +1190,260 @@
     // A browser does not reliably tear an <img> MJPEG stream down on navigation,
     // so release the camera explicitly when the page goes away (tab close,
     // reload, back button) instead of leaving the rover webcam running.
-    window.addEventListener('pagehide', () => hwStopCameraFeed());
+    // ─── Camera Mirror Toggle ─────────────────────────────────
+    let hwCameraMirrored = false;
+    function hwToggleMirror() {
+        hwCameraMirrored = !hwCameraMirrored;
+        const imgs = ['hw-camera-feed', 'hw-camera-feed-split'];
+        imgs.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (hwCameraMirrored) {
+                    el.classList.add('hw-camera-mirrored');
+                } else {
+                    el.classList.remove('hw-camera-mirrored');
+                }
+            }
+        });
+        const btn = document.getElementById('hw-btn-mirror');
+        if (btn) {
+            btn.innerHTML = hwCameraMirrored ? '🪞 Mirror: ON' : '🪞 Mirror: OFF';
+            if (hwCameraMirrored) btn.classList.add('active');
+            else btn.classList.remove('active');
+        }
+    }
+
+    // ─── Camera Fullscreen Toggle ─────────────────────────────
+    function hwToggleFullscreen(containerId) {
+        const container = document.getElementById(containerId) || document.getElementById('hw-camera-panel-container');
+        if (!container) return;
+
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+            if (container.requestFullscreen) {
+                container.requestFullscreen().catch(() => {});
+            } else if (container.webkitRequestFullscreen) {
+                container.webkitRequestFullscreen();
+            }
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen().catch(() => {});
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+        }
+    }
+
+    // Sync fullscreen button text on change
+    document.addEventListener('fullscreenchange', () => {
+        const btn = document.getElementById('hw-btn-fullscreen');
+        if (btn) {
+            btn.innerHTML = document.fullscreenElement ? '✕ Exit Fullscreen' : '⛶ Fullscreen';
+        }
+    });
+
+    // ─── LED Matrix Mode Switcher ─────────────────────────────
+    let hwCurrentLedMode = 'ok';
+    async function hwSetLedMode(mode, btnEl) {
+        hwCurrentLedMode = mode;
+        document.querySelectorAll('.hw-led-mode-btn').forEach(b => {
+            b.classList.remove('active');
+            if (b.getAttribute('data-mode') === mode) b.classList.add('active');
+        });
+        const badge = document.getElementById('hw-led-active-badge');
+        if (badge) {
+            badge.textContent = `ACTIVE: ${mode.toUpperCase()}`;
+        }
+
+        try {
+            const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+            let res = null;
+            try {
+                res = await fetch(host + '/api/rover/led_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode }),
+                    signal: AbortSignal.timeout(2000)
+                });
+            } catch (_) {
+                res = await fetch('/api/rover/led_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode }),
+                    signal: AbortSignal.timeout(2000)
+                });
+            }
+        } catch (e) {
+            console.warn('[HardwareConnect] LED mode set failed:', e);
+        }
+    }
+
+    // ─── 3D Simulation & Hardware Benchmark Engine ────────────
+    let hwCurrentBenchTarget = 'computer';
+    function hwSelectBenchmarkTarget(target) {
+        hwCurrentBenchTarget = target;
+        const btnComp = document.getElementById('hw-bench-target-computer');
+        const btnHw = document.getElementById('hw-bench-target-hardware');
+        if (btnComp) btnComp.classList.toggle('active', target === 'computer');
+        if (btnHw) btnHw.classList.toggle('active', target === 'hardware');
+
+        const nameEl = document.getElementById('hw-b-target-name');
+        if (nameEl) {
+            nameEl.textContent = target === 'computer' ? 'Host Computer CPU' : 'Arduino Uno Q Qualcomm SoC';
+            nameEl.style.color = target === 'computer' ? '#38bdf8' : '#f59e0b';
+        }
+    }
+
+    async function hwRunBenchmark() {
+        const btn = document.getElementById('hw-btn-run-benchmark');
+        const origText = btn ? btn.innerHTML : '🚀 Run Benchmark';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Benchmarking...';
+        }
+
+        const set = (id, val, col) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.textContent = val;
+                if (col) el.style.color = col;
+            }
+        };
+
+        set('hw-b-duration', 'Computing...', '#94a3b8');
+        set('hw-b-throughput', 'Evaluating...', '#94a3b8');
+        set('hw-b-thermals', 'Measuring...', '#94a3b8');
+        set('hw-b-rating', 'Analyzing...', '#94a3b8');
+
+        try {
+            const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+            let res = null;
+            try {
+                res = await fetch(host + '/api/rover/benchmark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target: hwCurrentBenchTarget }),
+                    signal: AbortSignal.timeout(7000)
+                });
+            } catch (_) {
+                res = await fetch('/api/rover/benchmark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target: hwCurrentBenchTarget }),
+                    signal: AbortSignal.timeout(7000)
+                });
+            }
+
+            if (!res || !res.ok) throw new Error('Benchmark service offline');
+            const data = await res.json();
+
+            set('hw-b-target-name', data.name || (hwCurrentBenchTarget === 'computer' ? 'Host Computer CPU' : 'Arduino Uno Q Qualcomm SoC'), hwCurrentBenchTarget === 'computer' ? '#38bdf8' : '#f59e0b');
+            set('hw-b-duration', `${data.duration_ms} ms`, '#34d399');
+            set('hw-b-throughput', `${data.throughput_sps ? data.throughput_sps.toLocaleString() : '—'} s/s`, '#f59e0b');
+            if (data.temp_before_c !== null && data.temp_before_c !== undefined) {
+                set('hw-b-thermals', `${data.temp_after_c}°C (+${data.temp_rise_c}°C)`, '#a78bfa');
+            } else {
+                set('hw-b-thermals', 'Host Direct', '#94a3b8');
+            }
+            set('hw-b-rating', data.efficiency_rating || 'Optimal', '#e2e8f0');
+
+        } catch (err) {
+            set('hw-b-duration', 'Error', '#ef4444');
+            set('hw-b-throughput', 'Offline', '#ef4444');
+            set('hw-b-thermals', '—', '#94a3b8');
+            set('hw-b-rating', 'Bridge unreachable', '#f87171');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = origText;
+            }
+        }
+    }
+
+    // ─── Autonomous Ped/Car Tracking & Follow-Person (Team) ───────
+    let hwAutopilotEnabled = false;
+    let hwAutopilotMode = 'avoid'; // avoid | follow
+    async function hwToggleAutopilot() {
+        hwAutopilotEnabled = !hwAutopilotEnabled;
+        const btn = document.getElementById('hw-btn-autopilot-toggle');
+        const badge = document.getElementById('hw-t-autopilot-badge');
+        const thought = document.getElementById('hw-t-thought');
+        if (btn) {
+            if (hwAutopilotEnabled) {
+                btn.textContent = '🛑 Disable Auto-Pilot';
+                btn.style.background = 'rgba(239,68,68,0.18)';
+                btn.style.borderColor = '#ef4444';
+                btn.style.color = '#f87171';
+            } else {
+                btn.textContent = '🤖 Enable Auto-Pilot';
+                btn.style.background = 'rgba(56,189,248,0.08)';
+                btn.style.borderColor = 'rgba(56,189,248,0.5)';
+                btn.style.color = '#38bdf8';
+            }
+        }
+        if (badge) {
+            if (hwAutopilotEnabled) {
+                badge.textContent = hwAutopilotMode === 'follow' ? 'FOLLOW' : 'AVOID';
+                badge.style.background = hwAutopilotMode === 'follow' ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)';
+                badge.style.color = hwAutopilotMode === 'follow' ? '#34d399' : '#f59e0b';
+            } else {
+                badge.textContent = 'STANDBY';
+                badge.style.background = 'rgba(148,163,184,0.15)';
+                badge.style.color = '#94a3b8';
+            }
+        }
+        if (thought && !hwAutopilotEnabled) {
+            thought.textContent = 'Auto-pilot disabled — manual teleop active. Click Enable to let rover track peds/cars and avoid collisions.';
+        }
+        const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+        for (const base of [host, window.location.origin]) {
+            try {
+                const res = await fetch(base + '/api/rover/autopilot', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: hwAutopilotEnabled, mode: hwAutopilotMode }),
+                    signal: AbortSignal.timeout(2000)
+                });
+                if (res.ok) break;
+            } catch (_) {}
+        }
+        if (hwAutopilotEnabled && thought) {
+            thought.textContent = hwAutopilotMode === 'follow'
+                ? 'Follow mode: walking in front of the camera — rover will maintain ~1.35m gap and steer to keep you centered. Team tracking active.'
+                : 'Avoid mode: scanning for peds/cars — rover pivots/veers to avoid bumping, never drives through a person.';
+        }
+    }
+    function hwSetAutopilotMode(mode) {
+        hwAutopilotMode = (mode === 'follow' || mode === 'team') ? 'follow' : 'avoid';
+        document.querySelectorAll('.hw-autopilot-mode-btn').forEach(b => {
+            b.classList.remove('active');
+            b.style.background = 'transparent';
+            b.style.color = '#94a3b8';
+        });
+        const activeBtn = mode === 'follow' ? document.getElementById('hw-autopilot-mode-follow') : document.getElementById('hw-autopilot-mode-avoid');
+        if (activeBtn) {
+            activeBtn.classList.add('active');
+            activeBtn.style.background = mode === 'follow' ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)';
+            activeBtn.style.color = mode === 'follow' ? '#34d399' : '#f59e0b';
+        }
+        const badge = document.getElementById('hw-t-autopilot-badge');
+        if (badge && hwAutopilotEnabled) {
+            badge.textContent = hwAutopilotMode === 'follow' ? 'FOLLOW' : 'AVOID';
+            badge.style.background = hwAutopilotMode === 'follow' ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)';
+            badge.style.color = hwAutopilotMode === 'follow' ? '#34d399' : '#f59e0b';
+        }
+        if (hwAutopilotEnabled) {
+            const host = (document.getElementById('hw-bridge-host')?.value || hwBridgeHost || window.location.origin).replace(/\/+$/, '');
+            fetch(host + '/api/rover/autopilot', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true, mode: hwAutopilotMode })
+            }).catch(() => fetch('/api/rover/autopilot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, mode: hwAutopilotMode }) }).catch(()=>{}));
+        }
+        const hint = document.getElementById('hw-autopilot-hint');
+        if (hint) {
+            hint.textContent = hwAutopilotMode === 'follow'
+                ? 'Follow: rover locks onto the nearest person ahead and keeps ~1.35m — walk and it follows your team.'
+                : 'Avoid: rover treats every ped/car as hard obstacle — pivots away, never bumps.';
+        }
+    }
 
     // ── Expose to global scope ───────────────────────────────
     window.hwSelectDevice = hwSelectDevice;
@@ -1047,6 +1460,13 @@
     window.hwStopCameraFeed = hwStopCameraFeed;
     window.hwStartCameraFeed = hwStartCameraFeed;
     window.hwResumeCameraFeedIfActive = hwResumeCameraFeedIfActive;
+    window.hwToggleMirror = hwToggleMirror;
+    window.hwToggleFullscreen = hwToggleFullscreen;
+    window.hwSetLedMode = hwSetLedMode;
+    window.hwSelectBenchmarkTarget = hwSelectBenchmarkTarget;
+    window.hwRunBenchmark = hwRunBenchmark;
+    window.hwToggleAutopilot = hwToggleAutopilot;
+    window.hwSetAutopilotMode = hwSetAutopilotMode;
     try {
         Object.defineProperty(window, 'hwSelectedDevice', {
             get() { return hwSelectedDevice; },
@@ -1057,11 +1477,40 @@
         window.hwSelectedDevice = hwSelectedDevice;
     }
 
-    // Initial setup on load
+    // Initial setup on load — automatically probe and connect to rover
+    async function hwAutoProbeOnLoad() {
+        try {
+            const res = await fetch('/api/rover/status', { signal: AbortSignal.timeout(1500) });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.connected) {
+                    console.log('[HardwareConnect] Rover detected active on startup, connecting...');
+                    hwGoToStep(3);
+                    await hwAttemptConnect(true);
+                    setTimeout(() => hwPingLedSignal(), 400);
+                    return;
+                }
+            }
+        } catch (_) {}
+
+        // If not already active in bridge, auto-connect to physical Arduino Uno Q
+        try {
+            await hwAttemptConnect(false);
+            if (hwIsConnected) {
+                hwGoToStep(3);
+                setTimeout(() => hwPingLedSignal(), 400);
+            } else {
+                hwGoToStep(1);
+            }
+        } catch (_) {
+            hwGoToStep(1);
+        }
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => hwGoToStep(1));
+        document.addEventListener('DOMContentLoaded', () => hwAutoProbeOnLoad());
     } else {
-        hwGoToStep(1);
+        hwAutoProbeOnLoad();
     }
 
 })();

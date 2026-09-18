@@ -65,6 +65,66 @@ function startYoloServer() {
 }
 
 // ---------------------------------------------------------------------------
+// Wave Rover Hardware Bridge Bootstrap (Port 8081)
+// ---------------------------------------------------------------------------
+const ROVER_BRIDGE_SCRIPT = path.join(ROOT, 'python', 'waverover_bridge.py');
+let roverBridgeProc = null;
+let roverBridgeStarting = false;
+
+function startRoverBridge(callback) {
+    if (roverBridgeStarting) {
+        if (callback) callback(null, 'starting');
+        return;
+    }
+    if (roverBridgeProc && !roverBridgeProc.killed) {
+        if (callback) callback(null, 'already-running');
+        return;
+    }
+    if (!fs.existsSync(ROVER_BRIDGE_SCRIPT)) {
+        if (callback) callback(new Error('waverover_bridge.py not found'));
+        return;
+    }
+
+    // Probe port 8081 to check if already running externally
+    const testSock = new net.Socket();
+    testSock.setTimeout(400);
+    testSock.once('connect', () => {
+        testSock.destroy();
+        console.log('[rover-bridge] Port 8081 is already active (hardware bridge running).');
+        if (callback) callback(null, 'external-running');
+    });
+    testSock.once('error', () => {
+        testSock.destroy();
+        roverBridgeStarting = true;
+        try {
+            console.log(`[rover-bridge] Spawning Python hardware bridge (${PYTHON} ${ROVER_BRIDGE_SCRIPT})...`);
+            roverBridgeProc = spawn(PYTHON, [ROVER_BRIDGE_SCRIPT, '--web-port', '8081'], {
+                cwd: ROOT,
+                stdio: ['ignore', 'inherit', 'inherit']
+            });
+            roverBridgeProc.on('exit', (code) => {
+                console.log(`[rover-bridge] hardware bridge exited (code ${code}).`);
+                roverBridgeProc = null;
+                roverBridgeStarting = false;
+            });
+            setTimeout(() => {
+                roverBridgeStarting = false;
+                if (callback) callback(null, 'spawned');
+            }, 1200);
+        } catch (err) {
+            roverBridgeStarting = false;
+            console.error(`[rover-bridge] failed to start bridge: ${err.message}`);
+            if (callback) callback(err);
+        }
+    });
+    testSock.once('timeout', () => {
+        testSock.destroy();
+        roverBridgeStarting = false;
+    });
+    testSock.connect(8081, '127.0.0.1');
+}
+
+// ---------------------------------------------------------------------------
 // Static file HTTP server
 // ---------------------------------------------------------------------------
 const server = http.createServer((req, res) => {
@@ -87,6 +147,32 @@ const server = http.createServer((req, res) => {
                 res.end(content, 'utf-8');
             }
         });
+        return;
+    }
+
+    // Hardware bridge lifecycle controls
+    if (reqUrl === '/api/bridge/start') {
+        startRoverBridge((err, status) => {
+            res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify({ ok: !err, status: status || (err ? err.message : 'ok') }));
+        });
+        return;
+    }
+
+    if (reqUrl === '/api/bridge/status') {
+        const isRunning = Boolean(roverBridgeProc && !roverBridgeProc.killed);
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({
+            running: isRunning,
+            starting: roverBridgeStarting,
+            port: 8081
+        }));
         return;
     }
 
@@ -206,4 +292,15 @@ server.listen(PORT, () => {
     console.log('  - Client UI   : HTML5 / Canvas / WebGL 3-Ring HUD');
     console.log('========================================================================');
     startYoloServer();
+    startRoverBridge();
 });
+
+// Process cleanup on exit
+function shutdown() {
+    if (roverBridgeProc && !roverBridgeProc.killed) {
+        try { roverBridgeProc.kill(); } catch (_) {}
+    }
+    process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

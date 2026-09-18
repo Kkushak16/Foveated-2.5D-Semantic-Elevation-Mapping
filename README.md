@@ -419,6 +419,67 @@ python python/run_offline_pipeline.py --scan my_dataset/000000.bin
 
 ---
 
+### 6. 🤖 Waveshare 4WD Wave Rover & Arduino Uno Q Hardware Teleoperation
+
+The platform features end-to-end integration with the **Waveshare 4WD Wave Rover** robotics chassis and the **Arduino Uno Q** dual-core edge compute board:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 HOST PC / WEB HUD                                      │
+│               (http://localhost:8080 • WebGL HUD • Teleoperation Cockpit)              │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │ USB-C (ADB Port 7600/8081) / HTTP
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              ARDUINO UNO Q (ONBOARD)                                   │
+│  ┌─────────────────────────────────────────┐  ┌─────────────────────────────────────┐  │
+│  │     Qualcomm MPU (Debian Linux)         │  │     STM32 Cortex-M33 (Zephyr RTOS)  │  │
+│  │  • Containerized Python Proxy Bridge    │◄─┼─►• Arduino_RouterBridge RPC Server  │  │
+│  │  • Wi-Fi STA connected to Rover AP      │  │  • 13x8 LED Matrix Display Driver   │  │
+│  │  • ADB Forwarded REST Port 7600         │  │  • Closed-Loop Motor Watchdog       │  │
+│  └─────────────────────────────────────────┘  └──────────────────┬──────────────────┘  │
+└───────────────────────────────────────────┬──────────────────────┼─────────────────────┘
+                                            │ Wi-Fi HTTP (192.168.4.1)
+                                            ▼                      ▼
+┌──────────────────────────────────────────────────────┐  ┌──────────────────────────────┐
+│            WAVESHARE WAVE ROVER ESP32                │  │    13x8 LED MATRIX DISPLAY   │
+│  • 4WD High-Torque Motor PWM Driver & Encoders       │  │ • ⬆️ ⬇️ ⬅️ ➡️ Driving Arrows │
+│  • INA219 Real-Time Battery Voltage & Current        │  │ • 🟢 'OK' Connection Matrix  │
+│  • MPU6050 6-DOF IMU (Yaw, Pitch, Roll)              │  │ • 🌊 Snake / Wave Animations │
+└──────────────────────────────────────────────────────┘  └──────────────────────────────┘
+```
+
+#### Key Capabilities & Workflows:
+1. **IP-Driven Direct Connection**:
+   - Connect directly by specifying the Rover Wi-Fi / ESP32 IP (default: `192.168.4.1`).
+   - Supports seamless dual-transport dispatch: direct Wi-Fi HTTP and ADB-forwarded Uno Q daemon bridge (`127.0.0.1:7600`).
+2. **Physical Tire Verification Handshake**:
+   - Teleoperation controls (WASD, UI directional buttons) remain strictly locked (`🔒 LOCKED: CONNECT ROVER`) until hardware connects.
+   - Upon successful connection, the rover automatically executes an **immediate tire verification handshake**: rotates tires left (~350ms) -> rotates right (~350ms) -> halts -> illuminates the central 13x8 matrix with a glowing **OK** sign.
+   - Teleoperation unlocks instantly (`🟢 UNLOCKED: ROVER READY`).
+3. **Dynamic Directional Drive Arrows on 13x8 Matrix**:
+   - While driving, the Arduino Uno Q 13x8 matrix projects real-time directional feedback:
+     - ⬆️ **Forward** (`MATRIX_ARROW_UP`)
+     - ⬇️ **Backward** (`MATRIX_ARROW_DOWN`)
+     - ⬅️ **Turn Left** (`MATRIX_ARROW_LEFT`)
+     - ➡️ **Turn Right** (`MATRIX_ARROW_RIGHT`)
+   - Reverting to the active pattern (or "OK") as soon as the vehicle stops.
+4. **Procedural LED Matrix Sci-Fi Patterns**:
+   - Switchable directly from the Web HUD: `OK`, `Waves`, `Snake`, `Fast Lights`, `Matrix Rain`, `Flicker`, `Heart`, and `Turn OFF`.
+   - Safe watchdog disconnect animation: 3-pulse flicker -> 1.2s pulsing heart -> complete blackout across all transports.
+5. **Qwen3-VL Vision-Language Autonomous Navigation**:
+   - Autonomous vision-language perception engine operating in:
+     - 🛡️ **Auto-Avoid**: Detects pedestrians, vehicles, and barriers, issuing dynamic avoidance steering.
+     - 👥 **Follow Person (Team)**: Locks onto team members and maintains an adaptive 1.2m–1.5m following distance.
+
+#### Quickstart:
+```bash
+# Launch unified teleoperation cockpit & hardware bridges
+python run_dashboard.py
+```
+
+---
+
 ## 📊 Telemetry & Performance Benchmarks
 
 All benchmarks measured on **NVIDIA Jetson AGX Orin (64GB, 50W Mode)** and **Intel Core i7-12700H**:
@@ -457,9 +518,10 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 ├── cuda/                         # NVIDIA CUDA Acceleration
 │   ├── include/grid_projection.cuh
 │   └── src/grid_projection.cu    # Parallel 3D-to-2.5D projection kernels (<1.8ms)
-├── arduino/                      # Microcontroller Firmware
-│   └── wave_rover_controller/
-│       └── wave_rover_controller.ino # 115200 Baud JSON motor control & encoder telemetry
+├── arduino/                      # Microcontroller Firmware & Edge Daemons
+│   ├── wave_rover_controller/
+│   │   └── wave_rover_controller.ino # STM32/Zephyr firmware with 13x8 matrix & RouterBridge RPC
+│   └── wave_rover_python_main.py # Uno Q Linux container daemon (Port 7600 HTTP/Bridge proxy)
 ├── scripts/                      # Hardware Diagnostics & Setup Scripts
 │   ├── test_arduino_board.py     # Live diagnostic for Arduino Uno Q / COM serial
 │   └── jetson_setup.sh           # Automated JetPack environment configuration
@@ -469,8 +531,9 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 ├── python/                       # Machine Learning, Vision Servers & Offline Pipeline
 │   ├── semantic_detector.py      # Multi-backend detector (YOLOv8 / OpenCV HOG cascade)
 │   ├── yolo_vision_server.py     # High-speed WebSocket vision server for dashboard
+│   ├── qwen_vl_navigator.py      # Qwen3-VL Vision-Language autonomous perception agent
 │   ├── test_semantic_vision.py   # Test suite for static persons, vehicles & wheel parts
-│   ├── waverover_bridge.py       # Serial-to-HTTP/WS rover telemetry bridge
+│   ├── waverover_bridge.py       # Multi-transport hardware teleop & telemetry bridge
 │   └── camera_foveated_processor.py # 3-ring optical flow & ROI cropping
 └── web/                          # Teleoperation Dashboard UI & Bridges
     ├── server/websocket_bridge.js# Node.js HTTP & telemetry WebSocket bridge

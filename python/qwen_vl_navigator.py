@@ -37,11 +37,36 @@ class Qwen3VLNavigator:
         self.rover = rover_controller
         self.ollama_url = ollama_url
         self.autopilot_enabled = False
+        self.autopilot_mode = "avoid"  # avoid | follow
         self.lock = threading.Lock()
+        # Semantic ped/car detector (cv-cascade = zero-dependency fallback, YOLOv8n if available)
+        self.detector = None
+        self._detector_backend = "cv-cascade"
+        try:
+            from semantic_detector import SemanticDetector
+            try:
+                self.detector = SemanticDetector(backend="auto", conf_threshold=0.30)
+                self._detector_backend = getattr(self.detector, 'backend_name', 'auto')
+            except Exception:
+                try:
+                    self.detector = SemanticDetector(backend="cv-cascade", conf_threshold=0.30)
+                    self._detector_backend = "cv-cascade"
+                except Exception:
+                    self.detector = None
+        except Exception:
+            try:
+                from python.semantic_detector import SemanticDetector
+                self.detector = SemanticDetector(backend="cv-cascade", conf_threshold=0.30)
+                self._detector_backend = "cv-cascade"
+            except Exception:
+                self.detector = None
+        if self.detector is not None:
+            print(f"[QWEN3-VL] SemanticDetector ready (backend={self._detector_backend}) for ped/car tracking.")
         
         # Real-time Qwen3-VL State
         self.latest_state = {
             "autopilot_active": False,
+            "autopilot_mode": "avoid",
             "pillars": {
                 "sharper_vision": "Initializing high-acuity scene ingest...",
                 "deeper_thought": "Calibrating ego-perspective spatial horizon...",
@@ -54,7 +79,11 @@ class Qwen3VLNavigator:
                 "obstacle_right_dist_m": 4.1,
                 "steer_bias": 0.0,         # -1.0 (hard left) to +1.0 (hard right)
                 "hazard_detected": False,
-                "confidence": 0.96
+                "confidence": 0.96,
+                "tracked_peds": 0,
+                "tracked_vehicles": 0,
+                "follow_target_id": None,
+                "follow_dist_m": None,
             },
             "autonomous_command": {
                 "action": "STOP",
@@ -62,6 +91,7 @@ class Qwen3VLNavigator:
                 "speed_r": 0,
                 "target_heading_deg": 0.0
             },
+            "detections": [],  # last semantic detections for HUD/API
             "timestamp": time.time()
         }
         
@@ -69,17 +99,23 @@ class Qwen3VLNavigator:
         self.thread = threading.Thread(target=self._auto_navigation_loop, daemon=True)
         self.thread.start()
 
-    def set_autopilot(self, enabled: bool):
+    def set_autopilot(self, enabled: bool, mode: str = None):
         with self.lock:
             self.autopilot_enabled = bool(enabled)
+            if mode in ("avoid", "follow", "team"):
+                self.autopilot_mode = "follow" if mode == "team" else mode
             self.latest_state["autopilot_active"] = self.autopilot_enabled
+            self.latest_state["autopilot_mode"] = self.autopilot_mode
             if not self.autopilot_enabled and self.rover:
                 self.rover.stop()
-            print(f"[QWEN3-VL] Auto-Pilot Mode set to: {'ACTIVE' if self.autopilot_enabled else 'DISABLED'}")
+            print(f"[QWEN3-VL] Auto-Pilot set to: {'ACTIVE' if self.autopilot_enabled else 'DISABLED'} mode={self.autopilot_mode}")
 
     def analyze_frame(self, frame_bgr):
         """Analyzes camera frame using Qwen3-VL spatial perception heuristics & neural vision.
         Generates 'Sharper Vision', 'Deeper Thought', and 'Broader Action' outputs.
+        Now fuses YOLO semantic detections (ped/car) for collision avoidance and
+        team follow — rover will not bump into peds/cars and will follow a person
+        walking in front at a safe 1.2-1.4m gap.
         """
         if frame_bgr is None or np is None:
             return self.latest_state
@@ -107,56 +143,196 @@ class Qwen3VLNavigator:
         dist_center = max(0.4, min(6.0, 1.8 / (center_edge_density + 0.3)))
         dist_right = max(0.4, min(6.0, 1.8 / (right_edge_density + 0.3)))
 
+        # --- Semantic ped/car detections (YOLO / cv-cascade) ---
+        detections = []
+        peds = []
+        vehicles = []
+        if self.detector is not None and frame_bgr is not None:
+            try:
+                dets = self.detector.detect(frame_bgr)
+                # detector returns list of dicts {label, box: [x,y,w,h], conf, id, range_band}
+                for d in dets:
+                    lab = str(d.get('label', '')).lower()
+                    entry = {
+                        'label': lab,
+                        'box': list(d.get('box', [0,0,0,0])),
+                        'conf': float(d.get('conf', 0)),
+                        'range_band': d.get('range_band', 'mid'),
+                        'id': d.get('id', None),
+                    }
+                    detections.append(entry)
+                    if lab == 'person':
+                        peds.append(entry)
+                    elif lab in ('car','truck','bus','motorcycle','bicycle','vehicle'):
+                        vehicles.append(entry)
+            except Exception:
+                detections = []
+        # Fallback: if YOLO not available, synthesize weak ped cue from motion? Keep edge-only.
+
+        # Helper to estimate metric distance from box (same heuristic as HUD 3-ring)
+        def _est_dist_m(box, fh, fw):
+            x, y, bw, bh = box
+            bottom = (y + bh) / max(1, fh)
+            rel_h = bh / max(1, fh)
+            score = min(1.0, max(0, (bottom - 0.35) / 0.5)) * 0.55 + min(1.0, rel_h / 0.45) * 0.45
+            # score 0..1 (near=1) -> meters ~ 6 * (1 - score) + 0.6
+            return max(0.5, min(6.0, 6.0 * (1.0 - score) + 0.6)), score
+
+        # Per-sector ped/vehicle influence: if a ped/car overlaps sector, override distance
+        # Sector x-ranges: left 0-0.33w, center 0.33-0.66w, right 0.66-1.0w
+        def _closest_in_sector(items, x_min, x_max, fh, fw):
+            best = None
+            best_d = 10
+            for it in items:
+                x, y, bw, bh = it['box']
+                cx = x + bw * 0.5
+                if x_min <= cx <= x_max:
+                    d, s = _est_dist_m(it['box'], fh, fw)
+                    if d < best_d:
+                        best_d = d
+                        best = (it, d, s)
+            return best
+
+        ped_left = _closest_in_sector(peds, 0, w * 0.33, h, w)
+        ped_center = _closest_in_sector(peds, w * 0.33, w * 0.66, h, w)
+        ped_right = _closest_in_sector(peds, w * 0.66, w, h, w)
+        veh_left = _closest_in_sector(vehicles, 0, w * 0.33, h, w)
+        veh_center = _closest_in_sector(vehicles, w * 0.33, w * 0.66, h, w)
+        veh_right = _closest_in_sector(vehicles, w * 0.66, w, h, w)
+
+        # Fuse ped/vehicle distances into corridor distances (pedestrians are hard obstacles)
+        # If a ped is closer than ground estimate, it dominates that sector.
+        if ped_center and ped_center[1] < dist_center:
+            dist_center = ped_center[1]
+        if ped_left and ped_left[1] < dist_left:
+            dist_left = ped_left[1]
+        if ped_right and ped_right[1] < dist_right:
+            dist_right = ped_right[1]
+        if veh_center and veh_center[1] < dist_center:
+            dist_center = veh_center[1]
+        if veh_left and veh_left[1] < dist_left:
+            dist_left = veh_left[1]
+        if veh_right and veh_right[1] < dist_right:
+            dist_right = veh_right[1]
+
         # 2. DEEPER THOUGHT: Spatial reasoning & path planning
+        # Mode-aware planning:
+        #  - avoid (default): classic hazard pivot/veer; peds/cars = hard hazard
+        #  - follow: if a person is walking ahead in center, maintain 1.2-1.5m gap and
+        #            steer to keep them centered (team following).
+        mode = getattr(self, 'autopilot_mode', 'avoid')
         hazard = dist_center < 0.85
+        # Any close ped/vehicle (<1.0m in near band) is also hazard even if ground says clear
+        if ped_center and ped_center[1] < 1.0:
+            hazard = True
+        if veh_center and veh_center[1] < 1.0:
+            hazard = True
         steer_bias = 0.0
         thought_summary = ""
         action_decision = "FORWARD"
         target_speed_l = 140
         target_speed_r = 140
+        follow_target_id = None
+        follow_dist = None
+        ped_count = len(peds)
+        veh_count = len(vehicles)
 
-        if hazard:
-            # Immediate obstacle in front path
-            if dist_left > dist_right + 0.3:
-                steer_bias = -0.75 # Turn Left
-                action_decision = "PIVOT_LEFT"
-                target_speed_l = -110
-                target_speed_r = 130
-                thought_summary = f"Obstacle detected ahead at {dist_center:.2f}m. Left sector is clearer ({dist_left:.2f}m vs {dist_right:.2f}m). Executing counter-clockwise pivot."
+        if mode in ('follow', 'team') and ped_center is not None:
+            # Team follow: proportional distance + bearing control
+            _, ped_dist, _score = ped_center
+            follow_target_id = ped_center[0].get('id')
+            follow_dist = round(ped_dist, 2)
+            x, y, bw, bh = ped_center[0]['box']
+            cx = x + bw * 0.5
+            bearing_err = (cx - w * 0.5) / (w * 0.5)  # -1 .. 1
+            desired = 1.35  # target following gap (m)
+            err = ped_dist - desired
+            # Emergency: too close -> stop/creep back
+            if ped_dist < 0.70:
+                hazard = True
+                action_decision = "FOLLOW_HOLD"
+                target_speed_l = 0
+                target_speed_r = 0
+                steer_bias = max(-0.6, min(0.6, bearing_err * 0.6))
+                thought_summary = f"Follow: person {follow_target_id} TOO CLOSE at {ped_dist:.2f}m (target {desired:.1f}m). HOLD — maintaining team gap, bearing {bearing_err:+.2f}."
+            elif ped_dist > 3.2:
+                # Person far -> cruise toward them gently
+                hazard = False
+                action_decision = "FOLLOW_APPROACH"
+                base = 130
+                steer_bias = max(-0.5, min(0.5, bearing_err * 0.7))
+                # Differential steer
+                target_speed_l = int(base * (1 - steer_bias * 0.5))
+                target_speed_r = int(base * (1 + steer_bias * 0.5))
+                thought_summary = f"Follow: person {follow_target_id} at {ped_dist:.2f}m (target {desired:.1f}m). Approaching — steering {steer_bias:+.2f} to keep centered."
             else:
-                steer_bias = 0.75 # Turn Right
-                action_decision = "PIVOT_RIGHT"
-                target_speed_l = 130
-                target_speed_r = -110
-                thought_summary = f"Obstacle detected ahead at {dist_center:.2f}m. Right sector has greater clearance ({dist_right:.2f}m vs {dist_left:.2f}m). Executing clockwise pivot."
-        elif dist_left < 1.0:
-            # Too close to left wall
-            steer_bias = 0.35
-            action_decision = "VEER_RIGHT"
-            target_speed_l = 150
-            target_speed_r = 110
-            thought_summary = f"Left boundary clearance tight ({dist_left:.2f}m). Veering right to maintain lane center."
-        elif dist_right < 1.0:
-            # Too close to right wall
-            steer_bias = -0.35
-            action_decision = "VEER_LEFT"
-            target_speed_l = 110
-            target_speed_r = 150
-            thought_summary = f"Right boundary clearance tight ({dist_right:.2f}m). Veering left into open corridor."
+                # In band -> P-control on distance
+                kp = 85  # PWM per meter of error
+                vel = int(max(30, min(155, kp * err + 75)))
+                # Clamp so we never go negative in follow (we stop, not reverse into team)
+                if err < -0.15:
+                    vel = max(0, vel - 40)
+                steer_bias = max(-0.5, min(0.5, bearing_err * 0.65))
+                action_decision = "FOLLOW_CRUISE"
+                target_speed_l = int(vel * (1 - steer_bias * 0.35))
+                target_speed_r = int(vel * (1 + steer_bias * 0.35))
+                # Ensure min steer doesn't stall one wheel completely when going straight
+                target_speed_l = max(0, min(160, target_speed_l))
+                target_speed_r = max(0, min(160, target_speed_r))
+                # If clearly centered and in gap, describe as team-maintain
+                thought_summary = f"Follow: tracking person {follow_target_id} at {ped_dist:.2f}m (target {desired:.1f}m). Team-maintain — speed {vel} PWM, steer {steer_bias:+.2f}. Peds:{ped_count} Vehs:{veh_count}."
         else:
-            steer_bias = 0.0
-            action_decision = "CRUISE_FORWARD"
-            target_speed_l = 150
-            target_speed_r = 150
-            thought_summary = f"Drivable corridor clear (center {dist_center:.2f}m, left {dist_left:.2f}m, right {dist_right:.2f}m). Maintaining steady forward cruise."
+            # Classic avoid behaviour (also fallback when no ped in follow)
+            if hazard:
+                # Immediate obstacle in front path
+                if dist_left > dist_right + 0.3:
+                    steer_bias = -0.75 # Turn Left
+                    action_decision = "PIVOT_LEFT"
+                    target_speed_l = -110
+                    target_speed_r = 130
+                    extra = f" Peds:{ped_count} Vehs:{veh_count}." if (ped_count or veh_count) else ""
+                    thought_summary = f"Obstacle detected ahead at {dist_center:.2f}m. Left sector is clearer ({dist_left:.2f}m vs {dist_right:.2f}m). Executing counter-clockwise pivot.{extra}"
+                else:
+                    steer_bias = 0.75 # Turn Right
+                    action_decision = "PIVOT_RIGHT"
+                    target_speed_l = 130
+                    target_speed_r = -110
+                    extra = f" Peds:{ped_count} Vehs:{veh_count}." if (ped_count or veh_count) else ""
+                    thought_summary = f"Obstacle detected ahead at {dist_center:.2f}m. Right sector has greater clearance ({dist_right:.2f}m vs {dist_left:.2f}m). Executing clockwise pivot.{extra}"
+            elif dist_left < 1.0:
+                # Too close to left wall / ped
+                steer_bias = 0.35
+                action_decision = "VEER_RIGHT"
+                target_speed_l = 150
+                target_speed_r = 110
+                thought_summary = f"Left boundary clearance tight ({dist_left:.2f}m). Veering right to maintain lane center. Peds:{ped_count} Vehs:{veh_count}."
+            elif dist_right < 1.0:
+                # Too close to right wall / ped
+                steer_bias = -0.35
+                action_decision = "VEER_LEFT"
+                target_speed_l = 110
+                target_speed_r = 150
+                thought_summary = f"Right boundary clearance tight ({dist_right:.2f}m). Veering left into open corridor. Peds:{ped_count} Vehs:{veh_count}."
+            else:
+                steer_bias = 0.0
+                action_decision = "CRUISE_FORWARD"
+                target_speed_l = 150
+                target_speed_r = 150
+                thought_summary = f"Drivable corridor clear (center {dist_center:.2f}m, left {dist_left:.2f}m, right {dist_right:.2f}m). Maintaining steady forward cruise. Peds:{ped_count} Vehs:{veh_count}."
 
         # 3. BROADER ACTION: Motor primitives
-        sharper_vision_desc = f"Visual ground geometry parsed: Center {dist_center:.1f}m | Left {dist_left:.1f}m | Right {dist_right:.1f}m (Zero LiDAR)"
-        broader_action_desc = f"Command: {action_decision} (PWM L:{target_speed_l}, R:{target_speed_r}) -> Arduino Uno Q"
+        sharper_parts = [f"Center {dist_center:.1f}m | Left {dist_left:.1f}m | Right {dist_right:.1f}m"]
+        if ped_count or veh_count:
+            sharper_parts.append(f"YOLO: {ped_count} ped  {veh_count} veh via {self._detector_backend}")
+        else:
+            sharper_parts.append("Zero LiDAR + ground geometry")
+        sharper_vision_desc = " | ".join(sharper_parts)
+        broader_action_desc = f"Command: {action_decision} (PWM L:{target_speed_l}, R:{target_speed_r}) -> Arduino Uno Q [mode:{mode}]"
 
         with self.lock:
             self.latest_state = {
                 "autopilot_active": self.autopilot_enabled,
+                "autopilot_mode": mode,
                 "pillars": {
                     "sharper_vision": sharper_vision_desc,
                     "deeper_thought": thought_summary,
@@ -169,7 +345,11 @@ class Qwen3VLNavigator:
                     "obstacle_right_dist_m": round(dist_right, 2),
                     "steer_bias": round(steer_bias, 2),
                     "hazard_detected": hazard,
-                    "confidence": 0.94
+                    "confidence": 0.94,
+                    "tracked_peds": ped_count,
+                    "tracked_vehicles": veh_count,
+                    "follow_target_id": follow_target_id,
+                    "follow_dist_m": follow_dist,
                 },
                 "autonomous_command": {
                     "action": action_decision,
@@ -177,6 +357,7 @@ class Qwen3VLNavigator:
                     "speed_r": target_speed_r,
                     "target_heading_deg": round(steer_bias * 35.0, 1)
                 },
+                "detections": detections,
                 "timestamp": time.time()
             }
 
