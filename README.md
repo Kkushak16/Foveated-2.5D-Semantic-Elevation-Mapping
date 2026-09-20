@@ -27,10 +27,15 @@ Inspired by **human foveated vision**, the system allocates maximum compute and 
 | ![Dual-Sensor Teleop Split View](docs/images/dual_split_live.png) | ![LiDAR BEV Grid](docs/images/lidar_bev_grid_live.png) |
 | *Dual-Split teleoperation: Synchronized 3-ring LiDAR BEV grid (left) alongside live camera foveation with near/mid/far depth perspective bands and sky/hood spatial masking (right).* | *Full 2.5D BEV elevation grid: 3 concentric resolution tiers (Near 5cm, Mid 15cm, Far 50cm), bounding box classification, distance badges, and negative obstacle (pothole) markers.* |
 
-| **4. Camera Foveation with Active ROI & Depth Bands** | **5. Interactive Teleoperation Landing Interface** |
+| **4. Camera Foveation with Active ROI & Depth Bands** | **5. Physical Robot Teleoperation & 13x8 Matrix** |
 |:---:|:---:|
-| ![Camera Foveation](docs/images/camera_foveation_live.png) | ![Landing Hero Interface](docs/images/landing_hero.png) |
-| *Spatial horizon gating: Discards static non-road pixels (sky 35% and hood 15%) while applying optical-flow motion gating and depth-scaled detection boxes to dynamic obstacles.* | *Interactive browser HUD interface featuring instant view mode switching, live camera feed selection, LiDAR point cloud controls, and real-time compute savings telemetry.* |
+| ![Camera Foveation](docs/images/camera_foveation_live.png) | ![Hardware Teleoperation Cockpit](docs/images/hardware_teleop_cockpit.png) |
+| *Spatial horizon gating: Discards static non-road pixels (sky 35% and hood 15%) while applying optical-flow motion gating and depth-scaled detection boxes to dynamic obstacles.* | *Hardware mission cockpit: Real-time dual camera + BEV telemetry, Arduino Uno Q 13x8 LED matrix display controls, bus latency tracking, and physical tire verification handshake.* |
+
+| **6. Interactive Teleoperation Landing Interface & Hardware Wizard** |
+|:---:|
+| ![Landing Hero Interface](docs/images/landing_hero.png) |
+| *Interactive browser HUD interface featuring instant view mode switching, live hardware connection wizard (Arduino Uno Q, Wave Rover, ESP32, Raspberry Pi), and real-time compute savings telemetry.* |
 
 ---
 
@@ -323,6 +328,11 @@ For autonomous rovers, budget prototypes, and hackathons (e.g. Smart India Hacka
 #### Quick Start with Hardware Integration Engine:
 The frontend includes a built-in **Hardware Integration Engine** accessible at `http://localhost:8080#hardware` (or via the top navigation **"🔌 Connect Hardware"** button):
 
+| **Hardware Integration Engine (Board Switcher & Pinout Configuration)** |
+|:---:|
+| ![Hardware Integration Wizard & Board Selection](docs/images/hardware_setup_wizard.png) |
+| *Step 1 & 2 of the Hardware Integration Engine: Instant configuration and pinout guides for Arduino Uno Q, Raspberry Pi 4/5, ESP32, and custom robots.* |
+
 1. **Step 1 · Choose Hardware:**
    - **Arduino Uno Q (Recommended):** High-precision PWM motor drive, dual encoder tracking, and USB-C connectivity.
    - **Raspberry Pi 4 / 5:** High-performance Linux SBC running the Python telemetry bridge.
@@ -449,6 +459,11 @@ The platform features end-to-end integration with the **Waveshare 4WD Wave Rover
 └──────────────────────────────────────────────────────┘  └──────────────────────────────┘
 ```
 
+| **Waveshare Wave Rover & Arduino Uno Q Teleoperation Cockpit** |
+|:---:|
+| ![Live Robot Teleoperation & 13x8 Matrix Feedback](docs/images/hardware_teleop_cockpit.png) |
+| *Hardware Integration Cockpit: Synchronized real-time camera perception stream, 2.5D concentric BEV spatial map, live SoC thermals, battery voltage, and Arduino Uno Q 13x8 LED matrix feedback with physical drive teleop.* |
+
 #### Key Capabilities & Workflows:
 1. **IP-Driven Direct Connection**:
    - Connect directly by specifying the Rover Wi-Fi / ESP32 IP (default: `192.168.4.1`).
@@ -507,11 +522,13 @@ Foveated-2.5D-Semantic-Elevation-Mapping/
 │   └── deploy-pages.yml          # Automated GitHub Pages web dashboard deployment
 ├── docs/
 │   └── images/                   # High-res simulation captures & system architecture diagrams
-│       ├── sim_3d_world_live.png     # 3D city world with pure pursuit & body roll
-│       ├── dual_split_live.png       # Dual-sensor split view (LiDAR BEV + Camera)
-│       ├── lidar_bev_grid_live.png   # Full 3-ring BEV grid with distance labels
-│       ├── camera_foveation_live.png # Camera foveation with depth bands & ROI masking
-│       └── landing_hero.png          # Interactive HUD landing page
+│       ├── sim_3d_world_live.png       # 3D city world with pure pursuit & body roll
+│       ├── hardware_teleop_cockpit.png # Live rover teleop cockpit & LED matrix controls
+│       ├── hardware_setup_wizard.png   # 3-step hardware board selection & wiring wizard
+│       ├── dual_split_live.png         # Dual-sensor split view (LiDAR BEV + Camera)
+│       ├── lidar_bev_grid_live.png     # Full 3-ring BEV grid with distance labels
+│       ├── camera_foveation_live.png   # Camera foveation with depth bands & ROI masking
+│       └── landing_hero.png            # Interactive HUD landing page & connect navbar
 ├── cpp/                          # Modern C++ Core (Deterministic, Zero-GC)
 │   ├── include/                  # Headers: Ring buffer, LiDAR driver, ROS 2, TensorRT
 │   └── src/                      # Low-latency C++ implementations
